@@ -102,9 +102,9 @@ SkullKingAI/
 ## 💡 Example of Emergent Strategy
 Without hardcoding, the agentic pipeline independently discovered the concept of "Sloughing" (discarding high-value cards legally):
 
-> **[RULE]:** *When bidding 0, always prioritize sloughing off high cards or Specials when you are void in the lead suit to avoid forcing an opponent to win tricks.*
+> **[Strategy]:** *When holding any trump of value 5 or lower (Black 1‑5) without a higher trump or a Pirate/Skull King to back it up, do **not** count those low trumps toward your bid; instead subtract one from the estimated number of tricks you expect to win.*
 > 
-> **[RULE]:** *If you bid 0 and hold a high Special card (Pirate, King, etc.), prioritize playing it in a subsequent trick where you are likely to lose or force another player to win, rather than holding onto it for an uncertain outcome.*
+> **[Strategy]:** *If you hold a **Pirate** in a hand that also contains low‑value suit cards and the round’s bid is modest (≤ 3), avoid leading a suit card that you can beat with a higher suit or trump. Instead, lead the Pirate immediately. This forces any opponent who holds the corresponding higher‑ranked suit or a Trump to win the trick (or lose it if they also have a special), thereby preventing them from using their high cards later and giving you a better chance to hit your exact bid.*
 
 
 **Author:** Antonio Guillen-Perez
