@@ -109,4 +109,3 @@ Without hardcoding, the agentic pipeline independently discovered the concept of
 
 **Author:** Antonio Guillen-Perez
 **License:** MIT
-```
