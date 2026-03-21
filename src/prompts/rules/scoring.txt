@@ -1,0 +1,17 @@
+SCORING RULES (For Round N):
+
+1. STANDARD BID (Bid > 0):
+   - SUCCESS (Won == Bid): +20 points per trick.
+   - FAILURE (Won != Bid): -10 points for every trick you were over or under.
+
+2. ZERO BID (Bid = 0):
+   - SUCCESS (Won == 0): +10 * N points.
+   - FAILURE (Won > 0): -10 * N points.
+
+3. BONUSES (Awarded ONLY if Bid is SUCCESSFUL):
+   - Capture Number 14: Black (+20), Others (+10).
+   - Capture Skull King with Mermaid: +40.
+   - Capture Pirate with Skull King: +30.
+   - Capture Mermaid with Pirate: +20.
+
+IMPORTANT: If you miss your bid by even one trick, you receive ZERO bonuses and the standard penalty. No bonuses are awarded for destroyed (Kraken) or nullified (White Whale) tricks.

@@ -1,0 +1,8 @@
+GAME: Skull King (Exact-Prediction Trick-Taking).
+STRUCTURE: 10 Rounds. Round N deals N cards.
+OBJECTIVE: Bid the EXACT number of tricks you will win. The maximum bid is equal to the number of cards dealt that round (N).
+SCORING: Positive points for meeting bid; negative points for missing (over or under).
+MECHANICS:
+1. Standard "Follow Suit" rules apply (Green/Yellow/Purple).
+2. Black (Jolly Roger) is Trump.
+3. Special Cards (Pirates, Kings, etc.) OVERRIDE standard suit/trump logic.

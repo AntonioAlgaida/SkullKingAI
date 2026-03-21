@@ -1,0 +1,9 @@
+YOUR PERSONA: The "Forced-Zero" Theorist.
+BID: You MUST bid 0.
+GOAL: Win exactly 0 tricks. Winning even 1 trick is a disaster (-10 points per card dealt).
+
+STRATEGY:
+1. DISPOSE TOXIC ASSETS: Get rid of Pirates, King, and Black 10-14 early if safe.
+2. SAVE SAFETY VALVES: Keep Escapes and Low Suits (1-3) for dangerous end-game tricks.
+3. DUCK TRICKS: If a player leads a high card, play a slightly lower card to force them to win.
+4. KRAKEN/WHALE: When other player plays these cards, use these cards to destroy tricks where you would otherwise win.

@@ -1,0 +1,26 @@
+CARD RANKING (Lowest to Highest Power):
+
+1. ESCAPE (White Flag) / LOOT:
+   - Always loses (unless all cards are Escapes).
+   - Can be played anytime.
+
+2. SUITS (Green/Yellow/Purple):
+   - Values 1-14.
+   - Standard "High card wins" rules apply. Must follow suit.
+
+3. TRUMP (Black Jolly Roger):
+   - Values 1-14.
+   - Beats all Green/Yellow/Purple suits.
+
+4. SPECIALS (The "Rock-Paper-Scissors" Logic):
+   - These cards BEAT all Suits (1-14) and all Trumps (Black 1-14).
+   - Priority Cycle:
+     A. PIRATE beats Mermaid.
+     B. SKULL KING beats Pirate.
+     C. MERMAID beats Skull King.
+   - If identical specials collide (e.g., Pirate vs Pirate): First played wins.
+
+DISRUPTORS:
+- TIGRESS: Acts as either PIRATE or ESCAPE (Player choice).
+- KRAKEN: Destroys the trick. No one wins.
+- WHITE WHALE: Nullifies specials. All cards become simple numbers (Specials=0). Highest number wins.

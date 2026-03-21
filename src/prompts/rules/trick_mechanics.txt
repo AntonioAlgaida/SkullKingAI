@@ -1,0 +1,18 @@
+TRICK MECHANICS & CONSTRAINTS:
+
+1. LEADING:
+   - The first card played sets the "Lead Suit" (Green, Yellow, Purple, or Black Trump).
+   - If a Special card (Escape, Pirate, King, etc.) is led, there is NO Lead Suit. Players may play anything.
+
+2. FOLLOWING SUIT (CRITICAL RULE):
+   - If a Lead Suit exists, you MUST play a card of that exact suit if you have one in your hand.
+   - EXCEPTION: You may ALWAYS choose to play a Special card (Pirate, Mermaid, Skull King, Escape, Kraken, Whale, Tigress, Loot) instead of following suit.
+   - If you do not have the Lead Suit, you may play any card.
+
+3. RESOLUTION & TIE-BREAKERS:
+   - The winner is determined by the CARD HIERARCHY.
+   - If cards of exact equal power collide (e.g., two Pirates, or two Escapes), the FIRST played wins. So, if Player A leads with a Pirate and Player B also plays a Pirate, Player A wins the trick because they played it first.
+
+4. NEXT LEAD:
+   - The trick winner leads the next trick.
+   - If the trick is DESTROYED (Kraken) or nullified (White Whale + all Specials), the player who WOULD HAVE won leads next.
