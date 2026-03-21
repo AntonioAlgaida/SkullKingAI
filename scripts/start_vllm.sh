@@ -1,26 +1,35 @@
 #!/bin/bash
+# scripts/start_vllm.sh — Launch vLLM server for SkullZero
+#
+# Previous alternatives (still fit on RTX 3090):
+#   casperhansen/llama-3-8b-instruct-awq         (older, ~5 GB)
+#   hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4
+#   Qwen/Qwen3-8B                                (FP16, ~16 GB — no quantisation loss)
+#   bartowski/DeepSeek-R1-Distill-Qwen-14B-exl2  (INT4, ~9 GB — pure reasoning)
+#   mistralai/Mistral-Small-3.1-24B-Instruct-2503 (AWQ, ~13 GB — stronger, slower)
 
-# Model: Llama-3-8B-Instruct (Quantized for Speed/VRAM)
-# MODEL="casperhansen/llama-3-8b-instruct-awq"
-# MODEL="hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4"
-# MODEL="cyankiwi/Qwen3.5-9B-AWQ-4bit"
-MODEL="openai/gpt-oss-20b"
-# Get the absolute path to the models directory
-PROJECT_ROOT=$(pwd)
+MODEL="Qwen/Qwen3-14B-AWQ"
+
+# Always resolve paths relative to the project root, not CWD
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 MODEL_DIR="$PROJECT_ROOT/models"
 
 echo "Starting vLLM server..."
-echo "Model: $MODEL"
+echo "Model:   $MODEL"
 echo "Storage: $MODEL_DIR"
-echo "Port: 8000"
+echo "Port:    8000"
 
-# Create the directory if it doesn't exist
 mkdir -p "$MODEL_DIR"
 
-# Launch vLLM with the custom download directory
 uv run python -m vllm.entrypoints.openai.api_server \
-    --model $MODEL \
+    --model "$MODEL" \
     --download-dir "$MODEL_DIR" \
-    --max-model-len 4096 \
-    --gpu-memory-utilization 0.9 \
+    --dtype float16 \
+    --quantization awq \
+    --max-model-len 8192 \
+    --gpu-memory-utilization 0.90 \
+    --max-num-seqs 16 \
+    --enable-prefix-caching \
+    --tensor-parallel-size 1 \
     --port 8000

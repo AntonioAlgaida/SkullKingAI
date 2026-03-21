@@ -1,17 +1,45 @@
-SCORING RULES (For Round N):
+SCORING RULES — Exact Calculation for Round N:
 
-1. STANDARD BID (Bid > 0):
-   - SUCCESS (Won == Bid): +20 points per trick.
-   - FAILURE (Won != Bid): -10 points for every trick you were over or under.
+1. STANDARD BID (Bid ≥ 1):
+   SUCCESS (Won == Bid): Score = (+20 × Bid) + Capture Bonuses
+   FAILURE (Won ≠ Bid): Score = -10 × |Won - Bid|  (zero bonuses, regardless of captures)
 
 2. ZERO BID (Bid = 0):
-   - SUCCESS (Won == 0): +10 * N points.
-   - FAILURE (Won > 0): -10 * N points.
+   SUCCESS (Won == 0): Score = +10 × N  (where N = current round number)
+   FAILURE (Won ≥ 1): Score = -10 × N
+   Note: There are NO capture bonuses for zero bids. Only the round multiplier matters.
 
-3. BONUSES (Awarded ONLY if Bid is SUCCESSFUL):
-   - Capture Number 14: Black (+20), Others (+10).
-   - Capture Skull King with Mermaid: +40.
-   - Capture Pirate with Skull King: +30.
-   - Capture Mermaid with Pirate: +20.
+3. CAPTURE BONUSES (added to successful standard bids only):
+   - Black 14 captured: +20
+   - Colored 14 (Green/Purple/Yellow) captured: +10
+   - Skull King captures each Pirate in the trick: +30 per Pirate
+   - Mermaid captures Skull King: +40
+   - Pirate captures each Mermaid in the trick: +20 per Mermaid
+   Bonuses are LOST entirely if your bid fails. No partial credit.
 
-IMPORTANT: If you miss your bid by even one trick, you receive ZERO bonuses and the standard penalty. No bonuses are awarded for destroyed (Kraken) or nullified (White Whale) tricks.
+4. LOOT ALLIANCE BONUS (mutual, end-of-round):
+   If a Loot card was played and an alliance was formed (Loot player didn't win the trick):
+   → If BOTH the Loot player AND the trick winner each hit their own bid:
+   → EACH receives +20 bonus points (total +40 shared between the pair).
+   This is separate from capture bonuses and applies on top of everything else.
+
+SCORING EXAMPLES (Round 7 — 7 cards dealt):
+- Bid 3, Won 3: +60 base. If you also captured SK + 2 Pirates: +60 + 60 = +120 total.
+- Bid 3, Won 4: -10 (missed by 1). Zero bonuses, even if you captured SK.
+- Bid 3, Won 2: -10 (missed by 1). Same penalty whether over or under.
+- Bid 0, Won 0: +70 (10 × 7). Massive reward in late rounds.
+- Bid 0, Won 1: -70 (–10 × 7). Catastrophic in late rounds.
+
+ZERO BID VALUE BY ROUND:
+   Round 1:  ±10   Round 6:  ±60
+   Round 2:  ±20   Round 7:  ±70
+   Round 3:  ±30   Round 8:  ±80
+   Round 4:  ±40   Round 9:  ±90
+   Round 5:  ±50   Round 10: ±100  ← Most important decision in the game.
+
+CRITICAL SCORING INSIGHTS:
+- A swing from "bid 0 success" to "bid 0 failure" in Round 10 = 200 point difference.
+- Skull King + 3 Pirates in one trick = +90 bonus. This ALONE can decide a game.
+- Winning 1 extra trick on a bid of 2 turns +40 into -10. The difference is -50 points.
+- Always calculate: "What do I lose if I miss?" vs "What do I gain if I hit exactly?"
+- Bonuses only matter if your bid is correct. Never sacrifice bid accuracy to chase bonuses.

@@ -1,18 +1,68 @@
 TRICK MECHANICS & CONSTRAINTS:
 
-1. LEADING:
-   - The first card played sets the "Lead Suit" (Green, Yellow, Purple, or Black Trump).
-   - If a Special card (Escape, Pirate, King, etc.) is led, there is NO Lead Suit. Players may play anything.
+1. LEADING A TRICK:
+   - The first card played sets the "Lead Suit" IF it is a numbered card (Green/Purple/Yellow/Black).
+   - If the first card is a Special (Escape, Loot, Pirate, Mermaid, Skull King, Kraken, Whale, Tigress):
+     → NO Lead Suit is established. Every other player may play any card they wish.
+   - Special case: If Escape or Loot leads and a numbered card is played later, THAT numbered card
+     sets the Lead Suit for following players (but the Escape/Loot player already played freely).
 
 2. FOLLOWING SUIT (CRITICAL RULE):
-   - If a Lead Suit exists, you MUST play a card of that exact suit if you have one in your hand.
-   - EXCEPTION: You may ALWAYS choose to play a Special card (Pirate, Mermaid, Skull King, Escape, Kraken, Whale, Tigress, Loot) instead of following suit.
-   - If you do not have the Lead Suit, you may play any card.
+   - If a Lead Suit exists and you hold one or more cards of that suit, you MUST play one of them.
+   - EXCEPTION: You may ALWAYS play any Special card (Pirate, Mermaid, Skull King, Escape, Loot,
+     Kraken, White Whale, Tigress — any card with suit=SPECIAL) instead of following suit.
+     Specials are always playable, even if you hold the lead suit.
+   - If you have NO card of the lead suit, you may freely play any card (including Black trump).
 
-3. RESOLUTION & TIE-BREAKERS:
-   - The winner is determined by the CARD HIERARCHY.
-   - If cards of exact equal power collide (e.g., two Pirates, or two Escapes), the FIRST played wins. So, if Player A leads with a Pirate and Player B also plays a Pirate, Player A wins the trick because they played it first.
+3. TRICK RESOLUTION ORDER (priority):
+   Step 1 — Detect Disruptors (Kraken or White Whale).
+     · If Kraken was played: trick DESTROYED. See rule 5.
+     · If White Whale was played (no Kraken): all cards resolved by numeric value. See rule 6.
+     · If BOTH Kraken and White Whale in same trick: the SECOND one played determines the outcome.
+   Step 2 — RPS Special Resolution (if no disruptor):
+     · Any Mermaid + Skull King → Mermaid wins (+40 bonus).
+     · Skull King only (no Mermaid) → Skull King wins (+30 per Pirate in trick).
+     · Pirate only (no SK) → First Pirate played wins (+20 per Mermaid in trick).
+     · Mermaid only (no Pirate, no SK) → First Mermaid played wins.
+   Step 3 — Suited Logic (if no specials won):
+     · Among remaining cards: Black (Trump) beats all colors. Lead suit beats off-suits. Highest value wins.
 
-4. NEXT LEAD:
-   - The trick winner leads the next trick.
-   - If the trick is DESTROYED (Kraken) or nullified (White Whale + all Specials), the player who WOULD HAVE won leads next.
+4. TIE-BREAKING:
+   - Two Pirates played → the FIRST one played wins.
+   - Two Mermaids played → the FIRST one played wins.
+   - Two identical numbered cards cannot exist (deck has one of each).
+   - Being the FIRST to play a powerful card secures it. Playing second loses the tie.
+
+5. KRAKEN (TRICK DESTRUCTION):
+   - No player wins the trick. No tricks-won counter increases. No capture bonuses awarded.
+   - To determine who leads NEXT: calculate who would have won ignoring the Kraken (treat it as Escape).
+   - That "would-have-won" player leads the next trick.
+   - Strategic value: Eliminates a trick from the round without anyone winning it.
+     → For zero-bid players: playing Kraken destroys a trick they were about to win.
+     → For bid players: destroys tricks opponents need, or tricks you don't want.
+
+6. WHITE WHALE (NULLIFICATION):
+   - All Special cards are treated as value 0 for this trick only.
+   - Highest numeric value wins (e.g., Yellow 12 beats a Pirate which is now 0).
+   - If ALL cards in the trick are Specials (all value 0), the trick is destroyed (no winner).
+   - No Special capture bonuses (SK/Pirate/Mermaid interactions) are awarded.
+   - Capture bonuses for 14s still apply if a numbered card wins.
+
+7. TIGRESS — DECISION AT PLAY TIME:
+   - When the Tigress is in your legal actions, you will see TWO options:
+     · Action 61: Play Tigress as a PIRATE (strong — wins tricks, counts as a Pirate for all interactions).
+     · Action 74: Play Tigress as an ESCAPE (safe — always loses, never wins a trick).
+   - This is the most flexible card in the game. You decide its role the moment you play it.
+
+8. LOOT CARD — ALLIANCE FORMATION:
+   - Loot always LOSES the trick (treated like Escape for winning purposes).
+   - When you play Loot and do NOT win the trick:
+     → If another player wins the trick, an alliance is formed between you and that winner.
+     → At round end, if BOTH you AND that winner hit your bids, you each receive +20 bonus points.
+   - Play Loot to "invest" in an ally's win. If you both succeed, you both profit.
+   - Do NOT play Loot into a trick you might accidentally win (rare but possible with all Escapes).
+
+9. NEXT TRICK LEAD:
+   - Standard: Trick winner leads next.
+   - Kraken: "Would-have-won" player leads next.
+   - White Whale + all Specials (destroyed): First player in trick order leads next.

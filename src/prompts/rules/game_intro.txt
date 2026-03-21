@@ -1,8 +1,37 @@
-GAME: Skull King (Exact-Prediction Trick-Taking).
-STRUCTURE: 10 Rounds. Round N deals N cards.
-OBJECTIVE: Bid the EXACT number of tricks you will win. The maximum bid is equal to the number of cards dealt that round (N).
-SCORING: Positive points for meeting bid; negative points for missing (over or under).
-MECHANICS:
-1. Standard "Follow Suit" rules apply (Green/Yellow/Purple).
-2. Black (Jolly Roger) is Trump.
-3. Special Cards (Pirates, Kings, etc.) OVERRIDE standard suit/trump logic.
+GAME: Skull King — Exact-Prediction Trick-Taking Card Game.
+
+STRUCTURE:
+- 10 Rounds. Round N deals exactly N cards to each player (4 players = 4 cards in Round 4, etc.).
+- Each round: BID phase (simultaneous) → PLAYING phase (N tricks) → SCORING.
+- Maximum bid is always N (the number of cards dealt).
+
+OBJECTIVE:
+Bid the EXACT number of tricks you will win. Winning MORE or FEWER than your bid both lose points.
+The game rewards precision, not raw power.
+
+THE DECK (74 unique cards, 75 legal actions):
+- COLORED SUITS (4 suits × 14 cards = 56 cards):
+  · Green (Parrot), Purple (Map), Yellow (Chest): Ranks 1–14. Equal to each other.
+  · Black (Jolly Roger): Ranks 1–14. BLACK IS TRUMP — it beats all colored suits.
+- SPECIAL CARDS (18 cards, all have suit=SPECIAL):
+  · 5 Pirates: Beat all numbered cards (Green/Purple/Yellow/Black 1-14).
+  · 1 Skull King: Beats all Pirates. The most powerful card in the game (with one exception).
+  · 2 Mermaids: Beat the Skull King. Lose to all Pirates.
+  · 1 Tigress: You choose at play time — act as Pirate (Action 61) OR Escape (Action 74).
+  · 5 Escapes (White Flags): Always lose. Safe throw-away cards.
+  · 2 Loot: Always lose the trick, but create a COOPERATION ALLIANCE (see scoring).
+  · 1 Kraken: DESTROYS the trick. No one wins it. The "would-have-won" player leads next.
+  · 1 White Whale: NULLIFIES all specials. All cards resolved purely by numeric value; specials have value 0.
+
+FOLLOW SUIT RULE (Critical):
+- If a numbered/trump suit is led, you MUST play a card of that exact suit if you hold one.
+- EXCEPTION: You may ALWAYS play any Special card (Pirate, SK, Mermaid, Escape, Loot, Kraken, Whale, Tigress)
+  instead of following suit. Specials are free to play at any time.
+- If you have no card of the lead suit, you may play ANY card.
+- If a Special card is led first, there is NO lead suit — everyone plays freely.
+
+SCORING STAKES:
+- Round 10 zero bid: SUCCESS = +100 points, FAILURE = -100 points. Most decisive moment of the game.
+- A single Skull King capturing 3 Pirates = +90 BONUS alone, on top of the +20 for winning the trick.
+- Missing your bid by just 1 trick costs -10 points AND loses ALL capture bonuses.
+- Precision and planning beat raw aggression every round.

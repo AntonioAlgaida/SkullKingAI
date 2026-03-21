@@ -2,110 +2,148 @@
 
 import logging
 import re
-from typing import List, Dict, Any
+from typing import List
+
 from src.agents.llm_client import LLMClient
 from src.memory.rag_engine import StrategyMemory
 from src.utils.prompt_loader import PromptLoader
 
 logger = logging.getLogger(__name__)
 
+
 class MemoryPruner:
     """
     Acts as a 'Garbage Collector' for the RAG Memory.
-    Uses LLM-as-a-Judge to identify and delete hallucinations, 
+    Uses LLM-as-a-Judge to identify and delete hallucinations,
     contradictions, or useless fluff.
+
+    Audits PLAYING and BIDDING rules separately so game context
+    matches the phase the rule was generated for.
     """
+
+    AUDIT_CRITERIA = """\
+DELETE a rule if it violates ANY of the following:
+1. HALLUCINATION : Suggests something illegal (e.g. "don't follow suit when you have the lead suit").
+2. CONTRADICTION : Mathematically impossible advice (e.g. advising a Zero-bidder to "win just one trick").
+3. USELESS FLUFF : Vague advice that gives no card-specific guidance (e.g. "play strategically", "be careful").
+4. ARTIFACT      : Contains raw output noise like "[ACTION]: <SKULL KING>" or incomplete sentences.
+
+If a rule is good, do NOT list it. When in doubt, keep it."""
+
     def __init__(self, client: LLMClient, memory: StrategyMemory):
         self.client = client
         self.memory = memory
 
+    # ------------------------------------------------------------------ #
+    # Entry point                                                          #
+    # ------------------------------------------------------------------ #
+
     def prune_persona(self, persona: str):
-        """Runs the audit process on a specific persona's memory."""
-        logger.info(f"Starting Pruning Cycle for Persona: {persona.upper()}")
-        
-        collection = self.memory._get_collection(persona)
-        if collection.count() == 0:
-            logger.info("Memory empty. Nothing to prune.")
+        """Runs the full audit cycle on a specific persona's memory."""
+        logger.info(f"[Pruner] Starting cycle for: {persona.upper()}")
+
+        collection  = self.memory._get_collection(persona)
+        total_before = collection.count()
+        if total_before == 0:
+            logger.info("[Pruner] Memory empty. Nothing to prune.")
             return
 
-        data = collection.get()
-        ids = data.get("ids", [])
-        documents = data.get("documents",[])
-        
-        # Batch processing (LLMs struggle to judge 30 rules at once)
-        batch_size = 10
-        ids_to_delete =[]
+        ids_to_delete = []
 
-        for i in range(0, len(ids), batch_size):
-            batch_ids = ids[i:i+batch_size]
-            batch_docs = documents[i:i+batch_size]
-            
-            logger.info(f"Auditing batch {i//batch_size + 1} ({len(batch_ids)} rules)...")
-            
-            trash_ids = self._audit_batch(persona, batch_ids, batch_docs)
-            ids_to_delete.extend(trash_ids)
+        # Audit PLAYING and BIDDING rules separately — different bundles as context
+        for phase in ("PLAYING", "BIDDING"):
+            bundle = (
+                PromptLoader.get_playing_bundle(persona)
+                if phase == "PLAYING"
+                else PromptLoader.get_bidding_bundle(persona)
+            )
 
+            try:
+                data = collection.get(where={"phase": phase})
+            except Exception:
+                # ChromaDB version without where-on-get support — fall back to all
+                data = collection.get()
+
+            ids  = data.get("ids", [])
+            docs = data.get("documents", [])
+
+            if not ids:
+                logger.info(f"[Pruner] No {phase} rules for {persona}. Skipping.")
+                continue
+
+            logger.info(f"[Pruner] Auditing {len(ids)} {phase} rules for {persona}...")
+
+            batch_size = 10
+            for i in range(0, len(ids), batch_size):
+                batch_ids  = ids[i : i + batch_size]
+                batch_docs = docs[i : i + batch_size]
+                logger.info(f"  Batch {i // batch_size + 1} / {(len(ids) - 1) // batch_size + 1} ({len(batch_ids)} rules)")
+                trash = self._audit_batch(persona, batch_ids, batch_docs, bundle, phase)
+                ids_to_delete.extend(trash)
+
+        # Apply deletions
         if ids_to_delete:
-            logger.warning(f"Deleting {len(ids_to_delete)} bad rules from DB: {ids_to_delete}")
+            logger.warning(
+                f"[Pruner] {persona.upper()}: deleting {len(ids_to_delete)}/{total_before} rules → "
+                f"{total_before - len(ids_to_delete)} remain. IDs: {ids_to_delete}"
+            )
             collection.delete(ids=ids_to_delete)
         else:
-            logger.info("Memory is clean. No rules deleted.")
+            logger.info(f"[Pruner] {persona.upper()}: memory clean. 0/{total_before} rules deleted.")
 
-    def _audit_batch(self, persona: str, ids: List[str], docs: List[str]) -> List[str]:
-        """Asks the LLM to judge a batch of rules."""
-        
-        # 1. Format the rules for the prompt
+    # ------------------------------------------------------------------ #
+    # Batch auditor                                                        #
+    # ------------------------------------------------------------------ #
+
+    def _audit_batch(
+        self,
+        persona: str,
+        ids: List[str],
+        docs: List[str],
+        bundle: str,
+        phase: str,
+    ) -> List[str]:
+        """Asks the LLM to judge one batch of rules. Returns IDs to delete."""
+
         rules_text = ""
         for rule_id, text in zip(ids, docs):
             rules_text += f"ID: [{rule_id}]\nRULE: {text}\n\n"
 
-        # 2. LOAD GAME CONTEXT (Fixed: Using bundles now)
-        # We use the playing bundle because these rules are for the Playing Phase
-        bundle = PromptLoader.get_playing_bundle(persona)
-        
-        # 3. Construct Prompt
-        prompt = f"""[SYSTEM]
-You are the Supreme Auditor for a Skull King AI. Your job is to delete bad memories from the AI's database.
+        # Static game context → system role (prefix-cached by vLLM)
+        system_prompt = (
+            f"You are the Supreme Auditor for a Skull King AI. "
+            f"Your job is to delete bad {phase} memories from the AI's database.\n\n"
+            f"[GAME RULES & STRATEGY]\n{bundle}\n\n"
+            f"[AUDIT CRITERIA]\n{self.AUDIT_CRITERIA}"
+        )
 
-[GAME RULES & STRATEGY]
-{bundle}
+        # Dynamic audit task + rule batch → user role
+        user_prompt = (
+            f"[{phase} RULES TO AUDIT]\n{rules_text}\n"
+            f"[TASK]\n"
+            f"Analyse each rule. Write brief CoT reasoning.\n"
+            f"Then list the IDs of rules that MUST BE DELETED.\n"
+            f"Output strictly as: [DELETE]: rule_1, rule_5\n"
+            f"If no rules should be deleted, output: [DELETE]: NONE"
+        )
 
-[AUDIT CRITERIA]
-You must DELETE a rule if it violates ANY of the following:
-1. HALLUCINATION: Suggests something illegal (e.g., "don't follow suit").
-2. CONTRADICTION: Suggests something mathematically stupid (e.g., advising a Zero-bidder to "take control" or "win just one trick").
-3. USELESS FLUFF: Vague advice that doesn't actually tell the AI what card to play (e.g., "play strategically", "be careful").
-4. ARTIFACTS: Contains weird text artifacts like "[ACTION]: <SKULL KING>".
-
-[RULES TO AUDIT]
-{rules_text}
-
-[TASK]
-Analyze each rule. Write brief CoT reasoning. 
-Then, list the IDs of the rules that MUST BE DELETED.
-If a rule is good, DO NOT list it.
-Output your final answer strictly as a comma-separated list of IDs inside brackets.
-Example: [DELETE]: rule_1, rule_5
-If no rules should be deleted, output: [DELETE]: NONE
-"""
         try:
-            # Low temperature because we want strict, analytical judgment
-            raw_content, _ = self.client.get_move_with_content(prompt, temperature=0.1)
-            
-            # Regex to find [DELETE]: rule_1, rule_2
-            match = re.search(r"\[DELETE\]:\s*(.*)", raw_content, re.IGNORECASE)
-            if match:
-                result_str = match.group(1).strip().lower()
-                if "none" in result_str:
-                    return[]
-                
-                # Extract words that look like rule_X
-                bad_ids = re.findall(r"(rule_\d+)", result_str)
-                return bad_ids
-            else:
-                logger.error(f"Failed to parse audit response:\n{raw_content}")
-                return[]
-                
+            raw_content = self.client.generate(user_prompt, system_prompt=system_prompt)
+
+            match = re.search(r"\[DELETE\]\s*:\s*(.*)", raw_content, re.IGNORECASE)
+            if not match:
+                logger.error(f"[Pruner] Failed to parse audit response:\n{raw_content[:300]}")
+                return []
+
+            result_str = match.group(1).strip().lower()
+            if "none" in result_str:
+                return []
+
+            bad_ids = re.findall(r"rule_\d+", result_str)
+            if bad_ids:
+                logger.info(f"[Pruner] Batch marked for deletion: {bad_ids}")
+            return bad_ids
+
         except Exception as e:
-            logger.error(f"Audit failed: {e}")
-            return[]
+            logger.error(f"[Pruner] Audit batch failed: {e}")
+            return []

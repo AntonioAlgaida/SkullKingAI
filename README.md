@@ -5,7 +5,7 @@
 [![ChromaDB](https://img.shields.io/badge/vectorDB-Chroma-orange.svg)](https://www.trychroma.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**SkullKingAI** is a research framework exploring **Asymmetric Co-Evolution** and **Verbal Reinforcement Learning** in complex, multi-agent Imperfect Information Games (IIGs). 
+**SkullKingAI** is a research framework exploring **Asymmetric Co-Evolution** and **Verbal Reinforcement Learning** in complex, multi-agent Imperfect Information Games (IIGs).
 
 Traditional Reinforcement Learning (RL) like PPO struggles with trick-taking games that feature dynamic alliances, strict suit-following constraints, and highly punitive exact-bidding mechanics. This project solves these bottlenecks using a **Neuro-Symbolic Architecture**, combining a deterministic Python state machine with Large Language Models (LLMs) acting as strategic reasoning agents.
 
@@ -13,33 +13,48 @@ Traditional Reinforcement Learning (RL) like PPO struggles with trick-taking gam
 
 - **Neuro-Symbolic Engine**: Python strictly enforces game physics and legal action masking (Symbolic), while the LLM manages Theory of Mind and strategic planning (Neural).
 - **Reflective RAG (Wake/Sleep Cycle)**: Agents play games relying on their current "Grimoire" of strategies. Offline, they analyze game traces to identify the root causes of failed bids and generate new natural language rules (Hindsight Experience Replay).
-- **Automated Memory Consolidation**: To prevent context degradation, a `MemoryPruner` uses semantic vector distance (L2) and an *LLM-as-a-Judge* to audit the database, deleting hallucinations, contradictions, and duplicates.
-- **High-Throughput Asynchronous Simulation**: Fully integrated with **vLLM** and `asyncio`, enabling continuous batching of concurrent games to maximize GPU utilization (tested on RTX 3090 24GB).
+- **Engine-Verified Counterfactual Simulation**: At the critical trick where a player's bid failure became inevitable, the engine replays the trick with every legal alternative card (ceteris-paribus). The LLM receives ground-truth evidence ("if you had played X, you *would have* lost the trick") rather than having to speculate.
+- **Rule Fitness Tracking**: Every ChromaDB rule carries a fitness score updated after each round. Rules relevant to a winning situation receive `+0.5`; rules active during a failure receive `−0.3`. Fitness adjusts retrieval ranking (`effective_distance = semantic_distance − fitness × 0.05`), so proven rules rise to the surface over time.
+- **Automated Memory Consolidation**: A `MemoryPruner` uses an *LLM-as-a-Judge* — auditing PLAYING and BIDDING rules separately against their respective strategy bundles — to delete hallucinations, contradictions, and fluff.
+- **vLLM Prefix Caching**: The static game-rules bundle (~3000 tokens) is sent as the system role so vLLM can cache and reuse its KV representation across all concurrent game calls. Only the dynamic game state (~300–500 tokens) changes per request.
+- **High-Throughput Asynchronous Simulation**: Fully integrated with **vLLM** and `asyncio`, enabling continuous batching of concurrent games to maximise GPU utilisation (tested on RTX 3090 24 GB).
+- **Per-Game Logging**: Each concurrent game writes to its own `logs/game_{id}.log` and a line-buffered `logs/game_{id}_play.txt` play-by-play file, `tail -f` compatible for live inspection.
 
 ## 🏴‍☠️ The Environment: Skull King
-Skull King is a highly volatile trick-taking game played over 10 rounds. 
+
+Skull King is a highly volatile trick-taking game played over 10 rounds.
 - **The Challenge**: Players must bid the *exact* number of tricks they will win. Overbidding or underbidding results in heavy penalties.
-- **The "Zero Meta"**: Bidding `0` offers massive rewards but devastating penalties if even a single trick is won. This creates a fascinating "Tragedy of the Commons" dynamic where agents actively try to force each other to win.
+- **The "Zero Meta"**: Bidding `0` offers massive rewards but devastating penalties if even a single trick is won. This creates a fascinating "Tragedy of the Commons" dynamic where agents actively try to force each other to win unwanted tricks.
 - **Non-Transitive Mechanics**: The game features a Rock-Paper-Scissors hierarchy (Mermaid > Skull King > Pirate > Mermaid) that overrides standard trump logic.
 
 ## 🏗️ Architecture & Pipeline
 
-1. **Phase 1: Game Execution (The Wake Cycle)**
-   - Agents translate the numeric game state into a semantic "Threat HUD" (e.g., assessing if an opponent is *STARVING* or *FULL* based on their bid).
-   - They query **ChromaDB** for specific rules relevant to their current hand and phase.
-   - LLMs use **Chain-of-Thought (CoT)** to select an action.
-2. **Phase 2: Hindsight Reflection (The Sleep Cycle)**
-   - After a batch of games, the Reflector isolates tricks where agents failed their bids.
-   - The LLM analyzes the play-by-play log and the agent's starting hand to deduce strategic errors.
-   - A new rule is written and embedded into ChromaDB.
-3. **Phase 3: Garbage Collection (The Pruning Cycle)**
-   - The DB is audited to remove low-quality or contradictory rules, maintaining a high signal-to-noise ratio in the RAG pipeline.
+### Wake Cycle (Game Execution)
+1. The **SemanticTranslator** converts the numeric game state into a rich text "Threat HUD" — assessing whether each opponent is *STARVING*, *FULL*, *OVERBOARD*, etc.
+2. **StrategyMemory** queries ChromaDB for rules relevant to the current phase and situation, re-ranking candidates by fitness-adjusted distance.
+3. The LLM uses **Chain-of-Thought (CoT)** reasoning to select an action from the legal action set.
+
+### Sleep Cycle (Hindsight Reflection)
+1. The **Reflector** loads completed game traces and groups events by player and round.
+2. For each failed round, it queries which rules were *relevant at the time* (`query_rule_ids`) before generating new ones — enabling offline credit assignment.
+3. **CounterfactualSimulator** reconstructs the player's hand at the critical trick, enumerates follow-suit-legal alternatives, and calls `physics.resolve_trick()` for each — providing engine-verified evidence to the LLM.
+4. New rules are embedded into ChromaDB with `fitness=0.0`. Previously relevant rules have their fitness updated (`FITNESS_WIN=+0.5` / `FITNESS_LOSS=−0.3`).
+
+### Pruning Cycle (Garbage Collection)
+1. The **MemoryPruner** audits PLAYING and BIDDING rules in separate batches, each against its matching strategy bundle.
+2. An *LLM-as-a-Judge* prompt classifies each rule as valid or one of: HALLUCINATION, CONTRADICTION, USELESS FLUFF, or ARTIFACT.
+3. Flagged rules are permanently deleted, maintaining a high signal-to-noise ratio in the RAG pipeline.
+
+### Full Loop
+```bash
+./run_loop.sh [ITERATIONS]   # Runs parallel games → sleep → pruning for N iterations
+```
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 - Linux / WSL2
-- NVIDIA GPU (24GB VRAM recommended for 27B+ parameter models)
+- NVIDIA GPU (24 GB VRAM recommended for 14B+ parameter models)
 - [uv](https://github.com/astral-sh/uv) (Python package manager)
 
 ### Installation
@@ -54,58 +69,76 @@ uv sync
 ```
 
 ### Running the Inference Server
-This project is optimized for running quantized reasoning models (e.g., Qwen3.5-27B AWQ or Llama-3-8B AWQ) using vLLM.
+The project is optimised for AWQ-quantized reasoning models via vLLM (default: `Qwen/Qwen3-14B-AWQ`).
 
 ```bash
-# Start the vLLM server (Defaults to port 8000)
-./scripts/start_vllm.sh
+# Start the vLLM server with prefix caching enabled (port 8000)
+bash scripts/start_vllm.sh
 ```
 
-### Running the Pipeline
-Open a new terminal. You can manage the entire pipeline using the provided scripts:
+Key flags set by the script: `--max-model-len 8192`, `--enable-prefix-caching`, `--max-num-seqs 16`.
 
+### Running the Pipeline
 ```bash
-# 1. Run 10 asynchronous concurrent games
+# Run 10 concurrent games (configurable in conf/config.yaml)
 uv run python run_parallel.py
 
-# 2. Trigger the Sleep Cycle to analyze logs and generate rules
+# Trigger the Sleep Cycle (counterfactual analysis + rule generation + fitness update)
 uv run python run_sleep_cycle.py
 
-# 3. Clean the memory database of hallucinations
+# Clean the memory database of hallucinations and contradictions
 uv run python run_pruning.py
 
-# 4. Export the AI's learned strategies to a Markdown file
+# Export learned strategies to Markdown
 uv run python scripts/visualize_memory.py
+
+# Or run the full loop for N iterations
+./run_loop.sh 10
+```
+
+### Monitoring Live Games
+Each concurrent game writes a line-buffered play-by-play file:
+```bash
+tail -f logs/game_3_play.txt
 ```
 
 ## 📂 Repository Structure
 
 ```text
 SkullKingAI/
-├── conf/                  # Hydra configuration files (Agents, LLM settings, etc.)
+├── conf/                  # Hydra configuration (agents, LLM settings, etc.)
 ├── data/
-│   ├── chroma_db/         # Local Vector Database (Ignored in Git)
+│   ├── chroma_db/         # Local Vector Database (not tracked in Git)
 │   └── artifacts/         # Exported strategy markdowns
-├── scripts/               # Bash scripts for inference servers
+├── logs/                  # Per-game logs and play-by-play files
+├── scripts/               # Bash scripts (vLLM server, memory visualisation)
 ├── src/
-│   ├── agents/            # LLM Client, Base Agents, and Heuristic Baselines
-│   ├── engine/            # Deterministic Python State Machine and Physics
-│   ├── memory/            # RAG Engine, Reflector (Sleep), and Pruner
-│   ├── prompts/           # Modular text files for rules and personas
-│   └── utils/             # Semantic Translators and Prompt Loaders
-├── main.py                # Single-game sequential execution
-├── run_parallel.py        # Asynchronous multi-game execution
-├── run_sleep_cycle.py     # Hindsight reflection trigger
-└── run_pruning.py         # Memory consolidation trigger
+│   ├── agents/            # LLM client, agent base class, heuristic baselines
+│   ├── engine/            # Deterministic game state machine and physics
+│   ├── memory/
+│   │   ├── rag_engine.py         # ChromaDB wrapper + fitness re-ranking
+│   │   ├── reflector.py          # Sleep cycle: trace analysis + rule generation
+│   │   ├── counterfactual.py     # Engine-verified alternative card simulation
+│   │   ├── pruner.py             # LLM-as-Judge memory garbage collector
+│   │   └── elo_tracker.py        # Per-agent ELO tracking across games
+│   ├── prompts/           # Modular text files (game rules, persona prompts)
+│   └── utils/             # Semantic translators, prompt loaders, play-by-play
+├── tests/                 # Pytest suite (physics, env, counterfactual, RAG, reflector)
+├── run_parallel.py        # Async multi-game execution
+├── run_sleep_cycle.py     # Sleep cycle trigger
+├── run_pruning.py         # Pruning cycle trigger
+└── run_loop.sh            # Full pipeline loop orchestrator
 ```
 
 ## 💡 Example of Emergent Strategy
+
 Without hardcoding, the agentic pipeline independently discovered the concept of "Sloughing" (discarding high-value cards legally):
 
-> **[Strategy]:** *When holding any trump of value 5 or lower (Black 1‑5) without a higher trump or a Pirate/Skull King to back it up, do **not** count those low trumps toward your bid; instead subtract one from the estimated number of tricks you expect to win.*
-> 
-> **[Strategy]:** *If you hold a **Pirate** in a hand that also contains low‑value suit cards and the round’s bid is modest (≤ 3), avoid leading a suit card that you can beat with a higher suit or trump. Instead, lead the Pirate immediately. This forces any opponent who holds the corresponding higher‑ranked suit or a Trump to win the trick (or lose it if they also have a special), thereby preventing them from using their high cards later and giving you a better chance to hit your exact bid.*
+> **[Strategy]:** *When holding any trump of value 5 or lower (Black 1–5) without a higher trump or a Pirate/Skull King to back it up, do **not** count those low trumps toward your bid; instead subtract one from the estimated number of tricks you expect to win.*
 
+> **[Strategy]:** *If you hold a **Pirate** in a hand that also contains low-value suit cards and the round's bid is modest (≤ 3), avoid leading a suit card that you can beat with a higher suit or trump. Instead, lead the Pirate immediately. This forces any opponent who holds the corresponding higher-ranked suit or a Trump to win the trick (or lose it if they also have a special), thereby preventing them from using their high cards later and giving you a better chance to hit your exact bid.*
+
+---
 
 **Author:** Antonio Guillen-Perez
 **License:** MIT

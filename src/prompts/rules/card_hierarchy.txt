@@ -1,26 +1,58 @@
-CARD RANKING (Lowest to Highest Power):
+CARD RANKING — Lowest Power to Highest Power:
 
-1. ESCAPE (White Flag) / LOOT:
-   - Always loses (unless all cards are Escapes).
-   - Can be played anytime.
+TIER 0 — ALWAYS LOSE:
+- ESCAPE (5 cards): Always loses to any non-Escape card. Safe dump cards.
+- LOOT (2 cards): Always loses the trick BUT creates a cooperation alliance (see LOOT MECHANIC below).
+  ⚠ LOOT IS NOT AN ESCAPE. It has a powerful secondary function. Do NOT treat it as just a dump card.
+- If ALL cards in a trick are Escapes/Loots, the first card played wins (extremely rare).
 
-2. SUITS (Green/Yellow/Purple):
-   - Values 1-14.
-   - Standard "High card wins" rules apply. Must follow suit.
+TIER 1 — COLORED SUITS (Green, Purple, Yellow — ranks 1-14):
+- High card of lead suit wins, unless trumped or beaten by a special.
+- All three colored suits are equal in power (Yellow 14 does NOT beat Green 13 unless it is the lead suit).
+- Must follow lead suit if you hold any card of that suit.
 
-3. TRUMP (Black Jolly Roger):
-   - Values 1-14.
-   - Beats all Green/Yellow/Purple suits.
+TIER 2 — BLACK TRUMP (Jolly Roger — ranks 1-14):
+- ANY Black card beats ALL colored suits, regardless of value (Black 1 beats Yellow 14).
+- Among multiple Black cards: highest value wins.
+- Black still loses to all Special characters (Pirates, Skull King, Mermaid).
 
-4. SPECIALS (The "Rock-Paper-Scissors" Logic):
-   - These cards BEAT all Suits (1-14) and all Trumps (Black 1-14).
-   - Priority Cycle:
-     A. PIRATE beats Mermaid.
-     B. SKULL KING beats Pirate.
-     C. MERMAID beats Skull King.
-   - If identical specials collide (e.g., Pirate vs Pirate): First played wins.
+TIER 3 — SPECIALS (Rock-Paper-Scissors Triangle):
+These cards beat ALL numbered suits (including Black). They follow a non-transitive hierarchy:
 
-DISRUPTORS:
-- TIGRESS: Acts as either PIRATE or ESCAPE (Player choice).
-- KRAKEN: Destroys the trick. No one wins.
-- WHITE WHALE: Nullifies specials. All cards become simple numbers (Specials=0). Highest number wins.
+  PIRATE beats MERMAID beats SKULL KING beats PIRATE.
+
+  Resolution when multiple Specials meet in one trick:
+  · If SKULL KING + MERMAID both present → MERMAID wins. (+40 bonus to winner)
+  · If SKULL KING present (no Mermaid) → SKULL KING wins. (+30 bonus per Pirate also in trick)
+  · If PIRATE present (no Skull King) → FIRST Pirate played wins. (+20 bonus per Mermaid also in trick)
+  · If only MERMAID(s) (no Pirate, no SK) → First Mermaid played wins.
+  · TIE-BREAKER for identical specials: First played wins (e.g., two Pirates → lead Pirate wins).
+
+TIGRESS — DUAL-ROLE WILDCARD:
+- At the moment you play it, you DECLARE its role:
+  · Action 61 = Tigress as PIRATE (powerful, will win tricks just like a Pirate).
+  · Action 74 = Tigress as ESCAPE (safe, will always lose).
+- Choose based on whether you need to win or avoid winning this trick.
+
+DISRUPTORS — Override Everything:
+- KRAKEN: Destroys the entire trick. No one wins. No points or bonuses awarded.
+  The player who WOULD HAVE won (calculated by treating Kraken as an Escape) leads the next trick.
+- WHITE WHALE: Nullifies all Special cards. All cards are resolved by numeric value alone.
+  Specials have value 0, so they all lose to any numbered card.
+  If ONLY Specials were played (all value 0), the trick is destroyed.
+  If both Kraken and White Whale are played in the same trick, the SECOND one played takes effect.
+
+BONUS POINTS (awarded ONLY on a successful bid, NOT on failure):
+- Black 14 captured in a won trick: +20 bonus
+- Colored 14 (Green/Purple/Yellow) captured: +10 bonus
+- Mermaid captures Skull King: +40 bonus to the Mermaid player
+- Skull King captures Pirates: +30 bonus PER Pirate captured (e.g., SK + 3 Pirates = +90 bonus!)
+- Pirate captures Mermaid: +20 bonus PER Mermaid captured
+
+LOOT ALLIANCE MECHANIC:
+- When you play a Loot card AND you do NOT win the trick (someone else wins it):
+  → An ALLIANCE is formed between you (the Loot player) and the trick winner.
+- At round end, if BOTH allied players successfully hit their bid:
+  → EACH player gets +20 BONUS POINTS.
+- Strategy: Play Loot into a trick you expect an ally to win. Free +20 for both if you both hit bid.
+- ⚠ Loot alliances reward cooperation. Play Loot strategically, not randomly.

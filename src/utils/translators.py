@@ -126,47 +126,44 @@ class SemanticTranslator:
                     
         return f"Toxicity Profile: {toxic} Toxic, {volatile} Volatile, {safe} Safe, {escapes} Escapes."
 
-    def build_llm_prompt_context(self, state_dict: Dict[str, Any], persona: str) -> str:
-        phase = state_dict["phase"]
-        round_num = state_dict["round_num"]
-        # New: Track who is leading the current trick
-        # If the trick is empty, it means the current_player_id is the one who will lead.
-        current_trick = state_dict.get("current_trick", [])
-        is_leading = len(current_trick) == 0
-        
-        
-        # 1. Fetch Phase-Specific Rule Bundle
+    def get_system_prompt(self, phase: str, persona: str) -> str:
+        """Returns the static rule bundle + persona. Intended for the system role.
+        This content is identical across all calls of the same phase/persona and
+        benefits from vLLM prefix caching."""
         if phase == "BIDDING":
-            rules_and_persona = PromptLoader.get_bidding_bundle(persona)
+            return PromptLoader.get_bidding_bundle(persona)
         else:
-            rules_and_persona = PromptLoader.get_playing_bundle(persona)
+            return PromptLoader.get_playing_bundle(persona)
 
-        # 2. Build Dynamic Context
-        hand_text = ", ".join([self.translate_card(c) for c in state_dict["my_hand"]])
+    def build_user_context(self, state_dict: Dict[str, Any]) -> str:
+        """Returns only the dynamic game state. Intended for the user role.
+        Changes every call, so it is intentionally kept short."""
+        phase     = state_dict["phase"]
+        round_num = state_dict["round_num"]
+
+        hand_text          = ", ".join([self.translate_card(c) for c in state_dict["my_hand"]])
         legal_actions_text = "\n".join([f"ID {aid}: {self.translate_card(aid)}" for aid in state_dict["legal_actions"]])
-        
-        # 3. Assemble Prompt
-        if phase == "BIDDING":
-            return f"""{rules_and_persona}
 
-[CURRENT STATE]
+        if phase == "BIDDING":
+            return f"""[CURRENT STATE]
 Phase: BIDDING (Round {round_num})
 Num of players: {len(state_dict['bids'])}
 My Hand: {hand_text}
 {self.categorize_hand_toxicity(state_dict["my_hand"])}
-How will lead the current trick: {self.get_hunger_matrix(state_dict)}
+Opponent hunger states: {self.get_hunger_matrix(state_dict)}
 I am player ID: {state_dict["current_player_id"]}
 
 [TASK]
 Analyze your cards and the scoring rules. Output your CoT reasoning, then output [ACTION]: <bid_number>."""
 
-        else: # PLAYING
-            trick_text = ", ".join([f"P{pid} played {self.translate_card(aid)}" for pid, aid in state_dict["current_trick"]])
-            if not trick_text: trick_text = "You are leading the trick."
-            
-            return f"""{rules_and_persona}
+        else:  # PLAYING
+            current_trick = state_dict.get("current_trick", [])
+            is_leading    = len(current_trick) == 0
+            trick_text    = ", ".join([f"P{pid} played {self.translate_card(aid)}" for pid, aid in current_trick])
+            if not trick_text:
+                trick_text = "You are leading the trick."
 
-[CURRENT STATE]
+            return f"""[CURRENT STATE]
 Phase: PLAYING (Round {round_num})
 Num of players: {len(state_dict['bids'])}
 My Target Bid: {state_dict["bids"][state_dict["current_player_id"]]}
@@ -188,3 +185,10 @@ My Hand: {hand_text}
 
 [TASK]
 Analyze the threat level and recall the card hierarchy. Write your CoT reasoning, then output [ACTION]: <ID>."""
+
+    def build_llm_prompt_context(self, state_dict: Dict[str, Any], persona: str) -> str:
+        """Legacy combined prompt (system bundle + user context in one string).
+        Used by reflector/pruner. New code should call get_system_prompt + build_user_context."""
+        system = self.get_system_prompt(state_dict["phase"], persona)
+        user   = self.build_user_context(state_dict)
+        return f"{system}\n\n{user}"

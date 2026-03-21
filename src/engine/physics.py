@@ -195,11 +195,9 @@ class GamePhysics:
         # --- 3. HANDLE WHITE WHALE ---
         if active_disruptor == CardType.WHITE_WHALE:
             winner_data = self._resolve_white_whale_logic(trick_data)
-            
+
             # EDGE CASE FIX: If winner is None (all specials), trick is destroyed
             if winner_data is None:
-                # Rule: "If only special cards were played, the trick is discarded and the person who would have won leads"
-                # "Would have won" in a tie of 0s is the first player.
                 return TrickResult(
                     winner_id=None,
                     next_lead_id=trick_data[0]['player_id'],
@@ -208,11 +206,19 @@ class GamePhysics:
                     captured_cards=[],
                     alliance_formed=False
                 )
-            
+
+            # Under White Whale, RPS bonuses don't apply but 14-capture bonuses still do.
+            # Any numbered 14 in the trick earns its bonus for the winner.
+            whale_bonus = 0
+            if winner_data['effective_type'] not in [CardType.ESCAPE, CardType.LOOT]:
+                for d in trick_data:
+                    if d['card'].value == 14:
+                        whale_bonus += 20 if d['card'].suit == Suit.BLACK else 10
+
             return TrickResult(
                 winner_id=winner_data['player_id'],
                 next_lead_id=winner_data['player_id'],
-                bonus_points=0, 
+                bonus_points=whale_bonus,
                 destroyed=False,
                 captured_cards=captured_ids,
                 alliance_formed=False

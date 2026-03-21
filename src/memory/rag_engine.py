@@ -3,9 +3,17 @@
 import os
 import chromadb
 import logging
-from typing import List, Dict, Any
-from chromadb.config import Settings
+from typing import Dict, Any, List, Tuple
 from src.engine.physics import GamePhysics, CardType, Suit
+
+# How much a rule's fitness score shifts its effective retrieval distance.
+# Positive fitness → effectively closer (easier to retrieve).
+# Set conservatively so fitness nudges ranking without dominating semantics.
+FITNESS_WEIGHT  = 0.05
+FITNESS_MAX     =  5.0
+FITNESS_MIN     = -3.0
+FITNESS_WIN     =  0.5   # delta added when the player succeeded this round
+FITNESS_LOSS    = -0.3   # delta added when the player failed this round
 
 logger = logging.getLogger(__name__)
 
@@ -62,44 +70,54 @@ class StrategyMemory:
         current_phase = state_dict["phase"]
         
         try:
-            # We ask for distance metrics now
-            results = collection.query(
-                query_texts=[query_text],
-                n_results=min(n_results, collection.count()), # Don't ask for more than exists
-                where={"phase": current_phase}
-            )
-            
-            # results['documents'] is a list of lists.
+            # Fetch 2× more results than needed so fitness re-ranking can surface
+            # high-fitness rules that are slightly less semantically close.
+            # Retry with 1 if ChromaDB rejects because n_results > filtered count.
+            fetch_n = min(n_results * 2, collection.count())
+            results = None
+            for attempt_n in [fetch_n, 1]:
+                try:
+                    results = collection.query(
+                        query_texts=[query_text],
+                        n_results=attempt_n,
+                        where={"phase": current_phase},
+                        include=["documents", "distances", "metadatas"],
+                    )
+                    break
+                except Exception:
+                    if attempt_n == 1:
+                        raise
+            if results is None:
+                raise RuntimeError("All query attempts failed")
+
             if not results['documents'] or not results['documents'][0]:
                 return f"No specific past strategies found for {current_phase} phase."
-            
-            docs = results['documents'][0]
-            distances = results['distances'][0]
-            
-            # --- DYNAMIC FILTERING ---
-            # Standard threshold for "Relevant": < 0.5 (for L2 distance)
-            # If the best match is 0.2 and the 10th match is 0.45, keep all.
-            # If the best is 0.2 and the next is 0.8, only keep the first.
-            
-            relevant_rules = []
-            threshold = 0.55  # Tune this: Lower = Stricter, Higher = More Rules
-            
-            for doc, dist in zip(docs, distances):
-                if dist < threshold:
-                    relevant_rules.append(doc)
-            
-            # Fallback: If nothing meets the threshold, take the top 1 anyway
-            if not relevant_rules and docs:
-                relevant_rules.append(docs[0])
-                
-            # Limit the prompt size to max 5-7 rules to prevent context pollution
-            final_rules = relevant_rules[:7]
 
-            rules_text = "\n".join([f"- {rule}" for rule in final_rules])
-            return rules_text
-            
+            docs      = results['documents'][0]
+            distances = results['distances'][0]
+            metas     = results['metadatas'][0]
+
+            # --- FITNESS-ADJUSTED RE-RANKING ---
+            # effective_score = distance - fitness * weight
+            # (lower is better — high fitness shrinks effective distance)
+            scored: List[Tuple[float, str]] = []
+            threshold = 0.55
+            for doc, dist, meta in zip(docs, distances, metas):
+                fitness  = float(meta.get("fitness", 0.0))
+                eff_dist = dist - fitness * FITNESS_WEIGHT
+                if eff_dist < threshold:
+                    scored.append((eff_dist, doc))
+
+            scored.sort(key=lambda x: x[0])
+
+            # Fallback: if nothing passes threshold, take raw top-1
+            if not scored and docs:
+                scored = [(distances[0], docs[0])]
+
+            final_rules = [doc for _, doc in scored[:7]]
+            return "\n".join(f"- {rule}" for rule in final_rules)
+
         except Exception as e:
-            # If collection is empty, standard behavior
             logger.error(f"Error retrieving rules: {e}")
             return f"Memory empty for {persona.upper()}. Playing mostly on instinct."
 
@@ -117,9 +135,12 @@ class StrategyMemory:
 
         # Generate ID based on count
         rule_id = f"rule_{collection.count() + 1}"
-        
+
         logger.info(f"[{persona}] Memorizing new strategy: {rule_id}")
-        
+
+        # Initialise fitness at 0 so the rule starts neutral and must earn its rank
+        metadata.setdefault("fitness", 0.0)
+
         collection.add(
             documents=[rule_text],
             metadatas=[metadata],
@@ -154,25 +175,127 @@ class StrategyMemory:
             
         return False
     
+    def query_rule_ids(
+        self, query_text: str, persona: str, phase: str, n_results: int = 5
+    ) -> List[str]:
+        """
+        Returns the IDs of rules semantically relevant to query_text.
+        Used by the reflector for offline fitness credit assignment.
+        """
+        collection = self._get_collection(persona)
+        if collection.count() == 0:
+            return []
+        # ChromaDB raises when n_results exceeds the number of documents that
+        # match the where-filter. Retry with n_results=1 as a safe fallback.
+        # Note: some ChromaDB versions don't support "ids" in query include —
+        # use "documents" (always valid) and read IDs from results["ids"].
+        for attempt_n in [min(n_results, collection.count()), 1]:
+            try:
+                results = collection.query(
+                    query_texts=[query_text],
+                    n_results=attempt_n,
+                    where={"phase": phase},
+                    include=["documents"],
+                )
+                if results["ids"] and results["ids"][0]:
+                    return results["ids"][0]
+                break
+            except Exception as e:
+                logger.debug(f"query_rule_ids error (attempt_n={attempt_n}): {e}")
+                if attempt_n == 1:
+                    return []
+        return []
+
+    def update_fitness(self, rule_ids: List[str], delta: float):
+        """
+        Adjusts the fitness score of each rule by delta (clamped to [FITNESS_MIN, FITNESS_MAX]).
+        Positive delta → rule contributed to a win.
+        Negative delta → rule was active during a failure.
+        """
+        if not rule_ids:
+            return
+
+        # We need to determine which persona collection holds each rule.
+        # Rule IDs are unique across collections, so we try both.
+        for collection in (self.zero_collection, self.rational_collection):
+            try:
+                data = collection.get(ids=rule_ids)
+            except Exception:
+                continue
+
+            if not data["ids"]:
+                continue
+
+            for rid, meta in zip(data["ids"], data["metadatas"]):
+                current = float(meta.get("fitness", 0.0))
+                new_val = max(FITNESS_MIN, min(FITNESS_MAX, current + delta))
+                updated_meta = {**meta, "fitness": new_val}
+                collection.update(ids=[rid], metadatas=[updated_meta])
+                logger.debug(f"[fitness] {rid}: {current:.2f} → {new_val:.2f} (Δ{delta:+.2f})")
+
     def _generate_query_context(self, state: Dict[str, Any]) -> str:
         """
-        Generates a Rich Semantic Query.
-        Includes Phase, Round, AND specific high-value cards held.
+        Generates a rich semantic query string for RAG retrieval.
+        For BIDDING: includes hand toxicity profile and round stakes.
+        For PLAYING: includes key cards held, round stage, and hunger context.
         """
-        if state["phase"] == "BIDDING":
-            return f"Bidding Phase. Round {state['round_num']}. Hand evaluation."
-        
-        # --- ENHANCED CONTEXT GENERATION ---
         round_num = state["round_num"]
         round_stage = "Late Game" if round_num > 7 else ("Mid Game" if round_num > 4 else "Early Game")
-        
-        # Identify Key Cards in Hand to make query specific
+
+        if state["phase"] == "BIDDING":
+            # Classify hand toxicity inline (mirrors SemanticTranslator.categorize_hand_toxicity)
+            toxic = volatile = safe = escapes = 0
+            for cid in state["my_hand"]:
+                if cid == 74:
+                    escapes += 1
+                    continue
+                c = self.physics.deck[cid]
+                if c.card_type in (CardType.ESCAPE, CardType.LOOT):
+                    escapes += 1
+                elif c.card_type in (CardType.SKULL_KING, CardType.PIRATE, CardType.MERMAID, CardType.TIGRESS):
+                    toxic += 1
+                elif c.card_type == CardType.NUMBER:
+                    if c.suit == Suit.BLACK:
+                        if c.value >= 10:
+                            toxic += 1
+                        else:
+                            volatile += 1
+                    else:
+                        if c.value >= 10:
+                            volatile += 1
+                        else:
+                            safe += 1
+
+            # Summarise opponent states (bids may be -1 if not yet revealed)
+            opp_states = []
+            my_id = state["current_player_id"]
+            for pid, (bid, won) in enumerate(zip(state["bids"], state["tricks_won"])):
+                if pid == my_id or bid == -1:
+                    continue
+                delta = bid - won
+                tricks_left = round_num - sum(state["tricks_won"])
+                if delta == 0:
+                    opp_states.append("FULL")
+                elif delta < 0:
+                    opp_states.append("OVERBOARD")
+                elif delta == tricks_left:
+                    opp_states.append("STARVING")
+                else:
+                    opp_states.append("HUNGRY")
+
+            opp_summary = ", ".join(opp_states) if opp_states else "unknown"
+            return (
+                f"Bidding Phase. {round_stage}. Round {round_num}. "
+                f"Hand: {toxic} Toxic, {volatile} Volatile, {safe} Safe, {escapes} Escapes. "
+                f"Opponents: {opp_summary}."
+            )
+
+        # PLAYING phase — key cards and situation
         hand_keywords = []
         for cid in state["my_hand"]:
-            if cid == 74: 
-                hand_keywords.append("Tigress Escape")
+            if cid == 74:
+                hand_keywords.append("Tigress as Escape")
                 continue
-            
             card = self.physics.deck[cid]
             if card.card_type == CardType.SKULL_KING:
                 hand_keywords.append("Holding Skull King")
@@ -180,13 +303,27 @@ class StrategyMemory:
                 hand_keywords.append("Holding Pirate")
             elif card.card_type == CardType.MERMAID:
                 hand_keywords.append("Holding Mermaid")
+            elif card.card_type == CardType.KRAKEN:
+                hand_keywords.append("Holding Kraken")
+            elif card.card_type == CardType.WHITE_WHALE:
+                hand_keywords.append("Holding White Whale")
             elif card.card_type == CardType.NUMBER and card.suit == Suit.BLACK and card.value >= 10:
                 hand_keywords.append("Holding High Black Trump")
             elif card.card_type == CardType.NUMBER and card.value == 14:
                 hand_keywords.append(f"Holding {card.suit.name} 14")
 
-        hand_context = ", ".join(set(hand_keywords)) # Remove dupes
-        
-        # Final Query String
-        # Example: "Playing Phase. Late Game. Holding Skull King, Holding Mermaid."
-        return f"Playing Phase. {round_stage}. {hand_context}"
+        hand_context = ", ".join(set(hand_keywords))
+
+        # Tricks needed gives context for whether agent is hunting or ducking
+        my_id = state["current_player_id"]
+        my_bid = state["bids"][my_id]
+        my_won = state["tricks_won"][my_id]
+        tricks_needed = my_bid - my_won if my_bid >= 0 else 0
+        if tricks_needed == 0:
+            mode = "ducking (bid met)"
+        elif tricks_needed < 0:
+            mode = "over bid (trying to lose)"
+        else:
+            mode = f"hunting {tricks_needed} more trick(s)"
+
+        return f"Playing Phase. {round_stage}. Round {round_num}. {hand_context}. {mode}."

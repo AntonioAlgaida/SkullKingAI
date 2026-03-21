@@ -56,7 +56,7 @@ class SkullKingEnv():
         self._deal_round()
         return self.get_state_dict()
     
-    def step(self, action_id: int) -> Tuple[Dict[str, Any], bool, Dict[str, Any]]:
+    def step(self, action_id: int) -> Tuple[Dict[str, Any], int, bool, Dict[str, Any]]:
         """
         Executes an action. Returns (New State, Is_Game_Over, Info_Dict).
         """

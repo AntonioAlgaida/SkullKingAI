@@ -2,63 +2,88 @@
 
 import logging
 import os
+import json
 import glob
 from pathlib import Path
+
 import hydra
-from omegaconf.dictconfig import DictConfig
+from omegaconf import DictConfig
+
 from src.agents.llm_client import LLMClient
 from src.memory.rag_engine import StrategyMemory
 from src.memory.reflector import SleepCycleReflector
 
 logging.basicConfig(level=logging.INFO)
-
-# Set up the logger
 log = logging.getLogger(__name__)
+
+# Tracks which trace files have already been processed so re-runs are safe.
+PROCESSED_LOG = Path(__file__).resolve().parent / "data" / "processed_traces.json"
+
+
+def _load_processed() -> set:
+    if PROCESSED_LOG.exists():
+        with open(PROCESSED_LOG, "r") as f:
+            return set(json.load(f))
+    return set()
+
+
+def _save_processed(processed: set):
+    PROCESSED_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(PROCESSED_LOG, "w") as f:
+        json.dump(sorted(processed), f, indent=2)
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig):
-    # 1. Point this to the latest Hydra output folder
-    # (You can automate finding the newest folder, but for now we hardcode the file)
-    # E.g., trace_path = "outputs/2026-03-01/16-00-00/game_trace.json"
-    
-    # 1. Get the absolute path to the project root (where this script lives)
     project_root = Path(__file__).resolve().parent
-    
-    # Construct the absolute search pattern: /home/anton/SkullZero/outputs/*/*/game_trace.json
-    search_pattern = str(project_root / "outputs" / "*" / "*" / "game_trace.json")
-    
-    # 2. Find all traces
-    list_of_files = glob.glob(search_pattern)
-    
-    if not list_of_files:
-        logging.error(f"No game traces found! Searched in: {search_pattern}")
-        return
-        
-    latest_trace = max(list_of_files, key=os.path.getctime)
-    print(f"Running Sleep Cycle on: {latest_trace}")
 
-    # 2. Initialize the AI components
+    # Find ALL game traces across every output folder
+    search_pattern = str(project_root / "outputs" / "*" / "*" / "game_trace.json")
+    parallel_pattern = str(project_root / "outputs" / "*" / "*" / "traces" / "game_*_trace.json")
+
+    all_traces = glob.glob(search_pattern) + glob.glob(parallel_pattern)
+
+    if not all_traces:
+        log.error(f"No game traces found. Searched:\n  {search_pattern}\n  {parallel_pattern}")
+        return
+
+    already_processed = _load_processed()
+    new_traces = [t for t in all_traces if os.path.abspath(t) not in already_processed]
+
+    if not new_traces:
+        log.info(f"All {len(all_traces)} trace(s) already processed. Nothing to do.")
+        return
+
+    log.info(f"Found {len(all_traces)} total trace(s). Processing {len(new_traces)} new one(s).")
+
+    # Sleep-cycle client: deeper reasoning with chain-of-thought enabled
     client = LLMClient(
-    base_url=cfg.llm.base_url, 
-    model_name=cfg.llm.model_name
-    
+        base_url=cfg.llm.base_url,
+        model_name=cfg.llm.model_name,
+        temperature=cfg.llm.reflection_temperature,
+        top_p=cfg.llm.reflection_top_p,
+        max_tokens=cfg.llm.reflection_max_tokens,
+        enable_thinking=cfg.llm.reflection_enable_thinking,
     )
-    memory = StrategyMemory(persistence_path="data/chroma_db")
+    memory   = StrategyMemory(persistence_path="data/chroma_db")
     reflector = SleepCycleReflector(client, memory)
 
-    # 3. Define the LLM Players map
-    # Currently, only Player 0 is an LLM. 
-    # In Phase 4, you will change this to: {0: "forced_zero", 1: "rational"}
-    llm_players_map = {
-        0: "forced_zero",
-        1: "rational",
-        2: "rational",
-        3: "rational"
-    }
+    newly_done = set()
+    for trace_path in sorted(new_traces):
+        log.info(f"--- Processing: {trace_path}")
+        try:
+            with open(trace_path, "r") as f:
+                trace_data = json.load(f)
+            # player_map in trace is {str_key: persona}, reflector expects {int_key: persona}
+            llm_players_map = {int(k): v for k, v in trace_data.get("player_map", {}).items()}
+            reflector.process_trace(trace_path, llm_players_map)
+            newly_done.add(os.path.abspath(trace_path))
+        except Exception as e:
+            log.error(f"Failed on {trace_path}: {e}")
 
-    # 4. Run the reflection!
-    reflector.process_trace(latest_trace, llm_players_map)
+    _save_processed(already_processed | newly_done)
+    log.info(f"Sleep cycle complete. Processed {len(newly_done)} new trace(s).")
+
 
 if __name__ == "__main__":
     main()

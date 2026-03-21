@@ -1,38 +1,69 @@
-defaults:  
-  - _self_  
+defaults:
+  - _self_
 
 experiment:
   name: "co_evolution_run"
   seed: 42
   save_json_logs: true
+  concurrent_games: 10
 
 game:
   num_players: 4
   num_rounds: 10
 
+# ---------------------------------------------------------------------------
+# vLLM server — launch with:
+#
+#   vllm serve Qwen/Qwen3-14B-AWQ \
+#     --dtype float16 \
+#     --quantization awq \
+#     --max-model-len 8192 \
+#     --gpu-memory-utilization 0.90 \
+#     --max-num-seqs 16 \
+#     --enable-prefix-caching \
+#     --tensor-parallel-size 1 \
+#     --port 8000
+#
+# Alternatives that also fit in 24 GB on a single RTX 3090:
+#   Qwen/Qwen3-8B                  (FP16, ~16 GB — no quantisation loss)
+#   Qwen/Qwen3-14B-AWQ             (INT4 AWQ, ~9 GB — recommended)
+#   bartowski/DeepSeek-R1-Distill-Qwen-14B-exl2  (INT4, ~9 GB — pure reasoning)
+#   mistralai/Mistral-Small-3.1-24B-Instruct-2503 (AWQ, ~13 GB — stronger, slower)
+# ---------------------------------------------------------------------------
 llm:
-  #vLLM
   base_url: "http://localhost:8000/v1"
-  # model_name: "casperhansen/llama-3-8b-instruct-awq" 
-  # model_name: "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4"
-  model_name: "openai/gpt-oss-20b"
+  model_name: "Qwen/Qwen3-14B-AWQ"
 
-  # LM Studio
-  # base_url: "http://192.168.1.67:1234/v1"
-  # model_name: "local-model"
-  temperature: 0.3
+  # --- Wake cycle (game moves): fast, focused, no deep thinking ---
+  temperature: 0.35
+  top_p: 0.90
+  max_tokens: 2048            # Must cover in-text CoT before [ACTION]: tag; 512 was cutting off mid-reasoning
+  enable_thinking: false      # Qwen3 hybrid mode: skip chain-of-thought for speed
+
+  # --- Sleep cycle (reflection): deeper reasoning, more creative rules ---
+  reflection_temperature: 0.45
+  reflection_top_p: 0.95
+  reflection_max_tokens: 2048
+  reflection_enable_thinking: true   # Full chain-of-thought for better rule quality
+
+  # --- Pruning cycle (LLM-as-judge): strict, low-temperature analytical judgment ---
+  pruner_temperature: 0.10
+  pruner_top_p: 0.90
+  pruner_max_tokens: 1024
+  pruner_enable_thinking: true   # Reasoning helps catch subtle hallucinations
+
   max_retries: 3
 
 agents:
   p0: "forced_zero"
-  p1: "rational"  # Changed from Heuristic to LLM
-  p2: "rational"  # Changed from Heuristic to LLM
-  p3: "rational"  # Changed from Heuristic to LLM
+  p1: "rational"
+  p2: "rational"
+  p3: "rational"
 
 hydra:
   run:
     dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
   job:
-    chdir: true  # Changes CWD to the output dir automatically
+    chdir: true
   verbose:
-    - src.agents.llm_agent  # This tells Hydra to show DEBUG logs for the agent
+    - src.agents.llm_agent
