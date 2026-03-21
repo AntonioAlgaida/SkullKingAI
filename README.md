@@ -40,7 +40,7 @@ Skull King is a highly volatile trick-taking game played over 10 rounds.
 ### Prerequisites
 - Linux / WSL2
 - NVIDIA GPU (24GB VRAM recommended for 27B+ parameter models)
--[uv](https://github.com/astral-sh/uv) (Python package manager)
+- [uv](https://github.com/astral-sh/uv) (Python package manager)
 
 ### Installation
 ```bash
