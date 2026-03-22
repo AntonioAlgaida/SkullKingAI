@@ -56,6 +56,10 @@ class PlayByPlay:
         bonus_str = f"  (+{bonus} bonus pts)" if bonus else ""
         self._w(f"  → P{winner_id} wins trick {self._trick_num}{bonus_str}")
 
+    def trick_destroyed(self, next_leader_id: int) -> None:
+        """Called when Kraken (or White Whale with all specials) destroys the trick."""
+        self._w(f"  → Trick {self._trick_num} DESTROYED (Kraken). P{next_leader_id} leads next.")
+
     def round_end(self, round_num: int, bids: List[int], won: List[int],
                   round_scores: List[int], total_scores: List[int], personas: Dict[int, str]) -> None:
         self._w()

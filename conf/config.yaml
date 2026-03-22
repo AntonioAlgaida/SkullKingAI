@@ -5,7 +5,22 @@ experiment:
   name: "co_evolution_run"
   seed: 42
   save_json_logs: true
-  concurrent_games: 10
+  # Mini-batch mode: run fewer games per batch so the sleep cycle fires more
+  # frequently. run_loop.sh runs MINI_BATCHES × (games + sleep) per outer
+  # iteration, then prunes once. Tune concurrent_games × mini_batches to set
+  # total games per outer iteration (e.g. 3 × 3 = 9 games before each prune).
+  concurrent_games: 3
+
+  # Starting-round diversity — spreads concurrent games across different game
+  # phases so the sleep cycle sees early, mid, and late-game situations each batch.
+  #
+  #   "fixed"      — all games start at round 1 (full 10-round games, default).
+  #   "stratified" — games are evenly spaced: with 3 games → rounds 1, 4, 7.
+  #                  Guarantees full phase coverage every batch.
+  #   "random"     — each game picks uniformly from [min_starting_round, 10].
+  #                  Natural coverage over many batches.
+  starting_round_strategy: "stratified"
+  min_starting_round: 1       # lower bound for "random"; ignored by other strategies
 
 game:
   num_players: 4
@@ -37,7 +52,7 @@ llm:
   # --- Wake cycle (game moves): fast, focused, no deep thinking ---
   temperature: 0.35
   top_p: 0.90
-  max_tokens: 2048            # Must cover in-text CoT before [ACTION]: tag; 512 was cutting off mid-reasoning
+  max_tokens: 1024            # Must cover in-text CoT before [ACTION]: tag; 512 was cutting off mid-reasoning
   enable_thinking: false      # Qwen3 hybrid mode: skip chain-of-thought for speed
 
   # --- Sleep cycle (reflection): deeper reasoning, more creative rules ---

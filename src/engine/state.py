@@ -48,11 +48,21 @@ class SkullKingEnv():
         self.current_trick_actions: List[tuple] = []
 
 
-    def reset(self) -> Dict[str, Any]:
-        self.current_round = 1
+    def reset(self, starting_round: int = 1) -> Dict[str, Any]:
+        """
+        Reset the environment for a new game.
+
+        starting_round: first round to simulate (1–10).
+          - 1  → full 10-round game (default).
+          - k  → game starts at round k and plays through to round 10.
+                 Scores begin at 0 regardless of k; only the hand size and
+                 round-number dynamics change.
+        """
+        self.current_round = max(1, min(starting_round, 10))
         self.scores = [0] * self.num_players
-        self.start_player_index = 0
-        
+        # Rotate the first leader to match what a real game would have at this round
+        self.start_player_index = (self.current_round - 1) % self.num_players
+
         self._deal_round()
         return self.get_state_dict()
     

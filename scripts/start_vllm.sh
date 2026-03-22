@@ -29,7 +29,7 @@ uv run python -m vllm.entrypoints.openai.api_server \
     --quantization awq \
     --max-model-len 8192 \
     --gpu-memory-utilization 0.90 \
-    --max-num-seqs 16 \
+    --max-num-seqs 32 \
     --enable-prefix-caching \
     --tensor-parallel-size 1 \
     --port 8000

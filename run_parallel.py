@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import random
 import hydra
 import json
 import os
@@ -20,6 +21,29 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 log = logging.getLogger(__name__)
 
+def _starting_round(game_id: int, num_games: int, cfg: DictConfig) -> int:
+    """
+    Returns the starting round for a given game based on the configured strategy.
+
+    fixed      — all games start at round 1 (full game).
+    stratified — games are evenly spread across [min_starting_round, 10].
+                 e.g. 3 games, min=1 → rounds 1, 4, 7.
+    random     — uniform sample from [min_starting_round, 10].
+    """
+    strategy  = getattr(cfg.experiment, "starting_round_strategy", "fixed")
+    min_round = int(getattr(cfg.experiment, "min_starting_round", 1))
+    min_round = max(1, min(min_round, 10))
+
+    if strategy == "stratified":
+        span = 10 - min_round          # playable range above min
+        step = span / max(num_games, 1)
+        return min_round + round(game_id * step)
+    elif strategy == "random":
+        return random.randint(min_round, 10)
+    else:  # "fixed" or anything unrecognised
+        return 1
+
+
 def _make_game_logger(game_id: int) -> logging.Logger:
     """Creates a logger that writes exclusively to logs/game_{id}.log."""
     os.makedirs("logs", exist_ok=True)
@@ -31,13 +55,13 @@ def _make_game_logger(game_id: int) -> logging.Logger:
     game_logger.addHandler(fh)
     return game_logger
 
-async def run_single_game(game_id: int, cfg: DictConfig, client: LLMClient, memory: StrategyMemory, elo: EloTracker):
-    """Runs a complete 10-round game asynchronously."""
+async def run_single_game(game_id: int, cfg: DictConfig, client: LLMClient, memory: StrategyMemory, elo: EloTracker, starting_round: int = 1):
+    """Runs a game starting from starting_round through round 10 asynchronously."""
     game_log = _make_game_logger(game_id)
-    game_log.info(f"[Game {game_id}] Initialization started...")
-    
+    game_log.info(f"[Game {game_id}] Initialization started... (starting round: {starting_round})")
+
     env = SkullKingEnv(num_players=cfg.game.num_players)
-    state = env.reset()
+    state = env.reset(starting_round=starting_round)
     translator = SemanticTranslator(env.physics)
     
     agents =[]
@@ -55,6 +79,7 @@ async def run_single_game(game_id: int, cfg: DictConfig, client: LLMClient, memo
 
     game_trace = {
         "game_id": game_id,
+        "starting_round": starting_round,
         "config": OmegaConf.to_container(cfg, resolve=True),
         "player_map": player_personas,
         "events": []
@@ -117,16 +142,29 @@ async def run_single_game(game_id: int, cfg: DictConfig, client: LLMClient, memo
 
         new_state, _, done, info = env.step(action_id)
 
-        if "trick_winner" in info and info["trick_winner"] != -1:
-            game_trace["events"].append({
-                "event_type": "trick_end",
-                "winner": info["trick_winner"],
-                "bonus": info["trick_bonus"]
-            })
-            pbp.trick_end(info["trick_winner"], info.get("trick_bonus", 0))
-            # Start next trick header if the round continues
-            if not done and new_state["phase"] == "PLAYING":
-                pbp.trick_start(new_state["current_player_id"])
+        if "trick_winner" in info:
+            if info.get("trick_destroyed"):
+                # Kraken (or White Whale all-specials): trick is destroyed, no winner.
+                game_trace["events"].append({
+                    "event_type": "trick_end",
+                    "winner": -1,
+                    "bonus": 0,
+                    "destroyed": True,
+                })
+                next_leader = new_state["current_player_id"]
+                pbp.trick_destroyed(next_leader)
+                if not done and new_state["phase"] == "PLAYING":
+                    pbp.trick_start(next_leader)
+            elif info["trick_winner"] != -1:
+                game_trace["events"].append({
+                    "event_type": "trick_end",
+                    "winner": info["trick_winner"],
+                    "bonus": info["trick_bonus"]
+                })
+                pbp.trick_end(info["trick_winner"], info.get("trick_bonus", 0))
+                # Start next trick header if the round continues
+                if not done and new_state["phase"] == "PLAYING":
+                    pbp.trick_start(new_state["current_player_id"])
 
         if "round_rewards" in info:
             new_totals   = list(new_state["scores"])
@@ -186,7 +224,13 @@ def main(cfg: DictConfig):
     concurrent_games = cfg.experiment.concurrent_games
 
     async def run_all():
-        tasks = [run_single_game(i, cfg, client, memory, elo) for i in range(concurrent_games)]
+        tasks = [
+            run_single_game(
+                i, cfg, client, memory, elo,
+                starting_round=_starting_round(i, concurrent_games, cfg),
+            )
+            for i in range(concurrent_games)
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return results
 

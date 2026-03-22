@@ -1,5 +1,6 @@
 # run_sleep_cycle.py
 
+import asyncio
 import logging
 import os
 import json
@@ -68,18 +69,24 @@ def main(cfg: DictConfig):
     memory   = StrategyMemory(persistence_path="data/chroma_db")
     reflector = SleepCycleReflector(client, memory)
 
-    newly_done = set()
-    for trace_path in sorted(new_traces):
-        log.info(f"--- Processing: {trace_path}")
-        try:
-            with open(trace_path, "r") as f:
-                trace_data = json.load(f)
-            # player_map in trace is {str_key: persona}, reflector expects {int_key: persona}
-            llm_players_map = {int(k): v for k, v in trace_data.get("player_map", {}).items()}
-            reflector.process_trace(trace_path, llm_players_map)
-            newly_done.add(os.path.abspath(trace_path))
-        except Exception as e:
-            log.error(f"Failed on {trace_path}: {e}")
+    async def run_all(traces):
+        """Process all traces concurrently — each trace fires its own gather internally."""
+        newly = set()
+
+        async def process_one(trace_path):
+            try:
+                with open(trace_path, "r") as f:
+                    trace_data = json.load(f)
+                llm_players_map = {int(k): v for k, v in trace_data.get("player_map", {}).items()}
+                await reflector.process_trace(trace_path, llm_players_map)
+                newly.add(os.path.abspath(trace_path))
+            except Exception as e:
+                log.error(f"Failed on {trace_path}: {e}")
+
+        await asyncio.gather(*[process_one(t) for t in sorted(traces)])
+        return newly
+
+    newly_done = asyncio.run(run_all(new_traces))
 
     _save_processed(already_processed | newly_done)
     log.info(f"Sleep cycle complete. Processed {len(newly_done)} new trace(s).")

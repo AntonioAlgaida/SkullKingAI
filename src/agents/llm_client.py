@@ -166,6 +166,39 @@ class LLMClient:
             logger.error(f"LLMClient generate error: {e}")
             return f"Error: {e}"
 
+    async def a_generate(self, prompt: str, system_prompt: str = None) -> str:
+        """Async text generation for sleep cycle (reflection run in parallel)."""
+        system = system_prompt or "You are a helpful AI assistant."
+        try:
+            response = await self.aclient.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": prompt},
+                ],
+                temperature=self.temperature,
+                top_p=self.top_p,
+                max_tokens=self.max_tokens,
+                extra_body={"chat_template_kwargs": {"enable_thinking": self.enable_thinking}},
+            )
+            message   = response.choices[0].message
+            reasoning = (
+                getattr(message, "reasoning_content", None)
+                or getattr(message, "reasoning", None)
+                or ""
+            )
+            content   = message.content or ""
+            full_text = f"{reasoning}\n{content}".strip()
+            if response.usage:
+                logger.info(
+                    f"[a_generate] tokens: prompt={response.usage.prompt_tokens}, "
+                    f"completion={response.usage.completion_tokens}"
+                )
+            return full_text
+        except Exception as e:
+            logger.error(f"LLMClient a_generate error: {e}")
+            return f"Error: {e}"
+
     # ------------------------------------------------------------------ #
     # Action parser                                                        #
     # ------------------------------------------------------------------ #
