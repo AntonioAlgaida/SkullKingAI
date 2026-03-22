@@ -18,6 +18,9 @@ Traditional Reinforcement Learning (RL) like PPO struggles with trick-taking gam
 - **Automated Memory Consolidation**: A `MemoryPruner` uses an *LLM-as-a-Judge* — auditing PLAYING and BIDDING rules separately against their respective strategy bundles — to delete hallucinations, contradictions, and fluff.
 - **vLLM Prefix Caching**: The static game-rules bundle (~3000 tokens) is sent as the system role so vLLM can cache and reuse its KV representation across all concurrent game calls. Only the dynamic game state (~300–500 tokens) changes per request.
 - **High-Throughput Asynchronous Simulation**: Fully integrated with **vLLM** and `asyncio`, enabling continuous batching of concurrent games to maximise GPU utilisation (tested on RTX 3090 24 GB).
+- **Async Sleep Cycle**: All reflection LLM calls within a trace are fired concurrently via `asyncio.gather()`, with prefix-cached system prompts — eliminating the serial 3-min-per-call bottleneck of a naive implementation.
+- **Stratified Starting Rounds**: Concurrent games are assigned different starting rounds (e.g., 3 games → rounds 1, 4, 7) so every mini-batch covers early, mid, and late-game situations. The engine supports starting from any round via `env.reset(starting_round=k)`.
+- **Mini-Batch Training Loop**: `run_loop.sh` runs `MINI_BATCHES × (games + sleep)` before each pruning pass, so agents receive updated rules several times per outer iteration rather than once.
 - **Per-Game Logging**: Each concurrent game writes to its own `logs/game_{id}.log` and a line-buffered `logs/game_{id}_play.txt` play-by-play file, `tail -f` compatible for live inspection.
 
 ## 🏴‍☠️ The Environment: Skull King
@@ -39,6 +42,7 @@ Skull King is a highly volatile trick-taking game played over 10 rounds.
 2. For each failed round, it queries which rules were *relevant at the time* (`query_rule_ids`) before generating new ones — enabling offline credit assignment.
 3. **CounterfactualSimulator** reconstructs the player's hand at the critical trick, enumerates follow-suit-legal alternatives, and calls `physics.resolve_trick()` for each — providing engine-verified evidence to the LLM.
 4. New rules are embedded into ChromaDB with `fitness=0.0`. Previously relevant rules have their fitness updated (`FITNESS_WIN=+0.5` / `FITNESS_LOSS=−0.3`).
+5. All LLM calls for a trace are batched into a single `asyncio.gather()`. Static game rules are in the system role for prefix caching; only the play-by-play and task are in the user role.
 
 ### Pruning Cycle (Garbage Collection)
 1. The **MemoryPruner** audits PLAYING and BIDDING rules in separate batches, each against its matching strategy bundle.
@@ -47,7 +51,11 @@ Skull King is a highly volatile trick-taking game played over 10 rounds.
 
 ### Full Loop
 ```bash
-./run_loop.sh [ITERATIONS]   # Runs parallel games → sleep → pruning for N iterations
+# MINI_BATCHES × (games + sleep) per iteration, then prune once
+./run_loop.sh [ITERATIONS] [MINI_BATCHES]
+
+# Example: 5 outer iterations, 3 mini-batches each → 9 games + 3 sleep cycles per prune
+./run_loop.sh 5 3
 ```
 
 ## 🚀 Getting Started
@@ -78,6 +86,8 @@ bash scripts/start_vllm.sh
 
 Key flags set by the script: `--max-model-len 8192`, `--enable-prefix-caching`, `--max-num-seqs 16`.
 
+The prefix cache hit rate should reach ~91% once the server is warm — verify with the vLLM stats log line: `Prefix cache hit rate: XX%`.
+
 ### Running the Pipeline
 ```bash
 # Run 10 concurrent games (configurable in conf/config.yaml)
@@ -92,8 +102,8 @@ uv run python run_pruning.py
 # Export learned strategies to Markdown
 uv run python scripts/visualize_memory.py
 
-# Or run the full loop for N iterations
-./run_loop.sh 10
+# Run the full loop: 5 iterations × 3 mini-batches (games+sleep each), prune once per iteration
+./run_loop.sh 5 3
 ```
 
 ### Monitoring Live Games
