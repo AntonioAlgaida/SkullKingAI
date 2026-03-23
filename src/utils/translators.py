@@ -141,17 +141,19 @@ class SemanticTranslator:
         phase     = state_dict["phase"]
         round_num = state_dict["round_num"]
 
-        hand_text          = ", ".join([self.translate_card(c) for c in state_dict["my_hand"]])
-        legal_actions_text = "\n".join([f"ID {aid}: {self.translate_card(aid)}" for aid in state_dict["legal_actions"]])
+        hand_text = ", ".join([self.translate_card(c) for c in state_dict["my_hand"]])
 
         if phase == "BIDDING":
+            legal_actions_text = "\n".join(
+                f"ID {aid}: {self.translate_card(aid)}" for aid in state_dict["legal_actions"]
+            )
             return f"""[CURRENT STATE]
 Phase: BIDDING (Round {round_num})
 Num of players: {len(state_dict['bids'])}
 My Hand: {hand_text}
 {self.categorize_hand_toxicity(state_dict["my_hand"])}
-Opponent hunger states: {self.get_hunger_matrix(state_dict)}
 I am player ID: {state_dict["current_player_id"]}
+NOTE: Bidding is simultaneous — opponent bids are not visible.
 
 [TASK]
 Analyze your cards and the scoring rules. Output your CoT reasoning, then output [ACTION]: <bid_number>."""
@@ -163,18 +165,39 @@ Analyze your cards and the scoring rules. Output your CoT reasoning, then output
             if not trick_text:
                 trick_text = "You are leading the trick."
 
+            winner_annotation = self._describe_current_winner(current_trick)
+
+            my_id       = state_dict["current_player_id"]
+            num_players = len(state_dict["bids"])
+            my_bid      = state_dict["bids"][my_id]
+            my_won      = state_dict["tricks_won"][my_id]
+            tricks_done = sum(state_dict["tricks_won"])
+            tricks_left = round_num - tricks_done
+
+            need = my_bid - my_won
+            if need > 0:
+                bid_status = f"I need {need} more win(s) across the {tricks_left} trick(s) left (including this one)."
+            elif need == 0:
+                bid_status = f"⚠ BID MET — I must LOSE this trick and all {tricks_left - 1} remaining trick(s)."
+            else:
+                bid_status = f"⚠ OVERBID by {-need} — bid already failed. Minimise further damage."
+
+            legal_actions_text = self._annotate_legal_actions(
+                state_dict["legal_actions"], current_trick, my_id, num_players
+            )
+
             return f"""[CURRENT STATE]
 Phase: PLAYING (Round {round_num})
-Num of players: {len(state_dict['bids'])}
-My Target Bid: {state_dict["bids"][state_dict["current_player_id"]]}
-My Tricks Won: {state_dict["tricks_won"][state_dict["current_player_id"]]}
+Num of players: {num_players}
+My Target Bid: {my_bid} | My Tricks Won: {my_won} | Tricks Left This Round: {tricks_left}
+{bid_status}
 LEAD STATUS: {'YOU ARE LEADING THIS TRICK' if is_leading else 'AN OPPONENT IS LEADING'}
 
 [OPPONENT THREAT LEVEL]
 {self.get_hunger_matrix(state_dict)}
 
 [TRICK HISTORY]
-Current Trick: {trick_text}
+Current Trick: {trick_text}{winner_annotation}
 [GRAVEYARD HUD]
 {self.summarize_graveyard(state_dict["graveyard"])}
 
@@ -185,6 +208,94 @@ My Hand: {hand_text}
 
 [TASK]
 Analyze the threat level and recall the card hierarchy. Write your CoT reasoning, then output [ACTION]: <ID>."""
+
+    def _annotate_legal_actions(
+        self, legal_actions: list, current_trick: list, my_id: int, num_players: int
+    ) -> str:
+        """
+        Returns the [YOUR LEGAL MOVES] block with a deterministic outcome label
+        appended to each action, computed by the physics engine.
+
+        When leading (empty trick): no annotation — every card trivially leads.
+        Mid-trick: annotates whether the card beats the current leader or not.
+        Last to play: outcome is fully certain — WINS or LOSES with the winner named.
+        """
+        if not current_trick:
+            # Leading — just list the cards, no outcome to annotate
+            return "\n".join(f"ID {aid}: {self.translate_card(aid)}" for aid in legal_actions)
+
+        is_last = len(current_trick) == num_players - 1
+        lines = []
+        for aid in legal_actions:
+            card_text = self.translate_card(aid)
+            try:
+                result = self.physics.resolve_trick(current_trick + [(my_id, aid)])
+            except Exception:
+                lines.append(f"ID {aid}: {card_text}")
+                continue
+
+            if result.destroyed:
+                label = "→ DESTROYS TRICK (Kraken — no winner, you lead next)"
+            elif is_last:
+                if result.winner_id == my_id:
+                    label = "→ WINS ✓ (outcome certain — you take this trick)"
+                else:
+                    label = f"→ LOSES ✗ (P{result.winner_id} wins — outcome certain)"
+            else:
+                if result.winner_id == my_id:
+                    label = "→ LEADS (you beat all cards played so far — others still to play)"
+                else:
+                    label = "→ LOSES to current leader (playing this card will not win the trick as it stands)"
+
+            lines.append(f"ID {aid}: {card_text}  {label}")
+        return "\n".join(lines)
+
+    def _describe_current_winner(self, current_trick: list) -> str:
+        """
+        Calls the physics engine on the partial trick to determine who is currently
+        winning and returns a one-line annotation explaining what can beat them.
+        Empty string when the agent is leading (no cards yet played).
+        """
+        if not current_trick:
+            return ""
+
+        result = self.physics.resolve_trick(current_trick)
+
+        if result.destroyed:
+            return "\n⚠ KRAKEN IS IN PLAY — this trick will be DESTROYED. No one wins it."
+
+        winner_id = result.winner_id
+        if winner_id is None:
+            return ""
+
+        # Find the winning card action id
+        winning_aid = next((aid for pid, aid in current_trick if pid == winner_id), None)
+        if winning_aid is None:
+            return ""
+
+        winning_text = self.translate_card(winning_aid)
+        winning_type = self.physics.actions[winning_aid]["as_type"]
+
+        if winning_type == CardType.SKULL_KING:
+            beats_hint = "Only a [Mermaid] can beat it."
+        elif winning_type == CardType.PIRATE:
+            beats_hint = "Only [Skull King] beats it. A second Pirate CANNOT win — first Pirate played wins."
+        elif winning_type == CardType.MERMAID:
+            beats_hint = "Any [Pirate] beats it."
+        elif winning_type == CardType.NUMBER:
+            card = self.physics.deck[winning_aid]
+            if card.suit == Suit.BLACK:
+                beats_hint = "Any Special ([Pirate], [Skull King], [Mermaid]) beats it, or a higher [Black] card."
+            else:
+                suit = card.suit.name.title()
+                beats_hint = (
+                    f"Any [Black] card or Special beats it. "
+                    f"A higher [{suit}] card also beats it if that suit was led."
+                )
+        else:
+            beats_hint = "Check card hierarchy."
+
+        return f"\n⚠ CURRENT WINNER: P{winner_id} with {winning_text}. {beats_hint}"
 
     def build_llm_prompt_context(self, state_dict: Dict[str, Any], persona: str) -> str:
         """Legacy combined prompt (system bundle + user context in one string).

@@ -70,8 +70,10 @@ def main(cfg: DictConfig):
     reflector = SleepCycleReflector(client, memory)
 
     async def run_all(traces):
-        """Process all traces concurrently — each trace fires its own gather internally."""
+        """Process all traces concurrently — each trace fires its own gather internally.
+        Progress is saved to disk after each trace so a mid-run kill loses no work."""
         newly = set()
+        lock  = asyncio.Lock()
 
         async def process_one(trace_path):
             try:
@@ -79,7 +81,10 @@ def main(cfg: DictConfig):
                     trace_data = json.load(f)
                 llm_players_map = {int(k): v for k, v in trace_data.get("player_map", {}).items()}
                 await reflector.process_trace(trace_path, llm_players_map)
-                newly.add(os.path.abspath(trace_path))
+                # Persist immediately so a kill mid-run doesn't lose completed work
+                async with lock:
+                    newly.add(os.path.abspath(trace_path))
+                    _save_processed(already_processed | newly)
             except Exception as e:
                 log.error(f"Failed on {trace_path}: {e}")
 
@@ -87,8 +92,6 @@ def main(cfg: DictConfig):
         return newly
 
     newly_done = asyncio.run(run_all(new_traces))
-
-    _save_processed(already_processed | newly_done)
     log.info(f"Sleep cycle complete. Processed {len(newly_done)} new trace(s).")
 
 

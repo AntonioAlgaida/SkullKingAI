@@ -10,42 +10,44 @@ class TestLLMAgent(unittest.TestCase):
     def setUp(self):
         self.physics = GamePhysics()
         self.translator = SemanticTranslator(self.physics)
-        
+
         # Mock the Client so we don't need LM Studio running for unit tests
         self.mock_client = MagicMock()
-        
+
+        # Use Rational persona so forced-zero shortcuts don't interfere
         self.agent = LLMAgent(
             client=self.mock_client,
             translator=self.translator,
-            persona="Forced-Zero"
+            persona="Rational"
         )
 
     def test_optimization_single_choice(self):
         """If only 1 move is legal, agent should not query LLM."""
         state = {
+            "phase": "PLAYING",
             "legal_actions": [42],
             # ... other state keys irrelevant for this test ...
         }
         action = self.agent.act(state)
         self.assertEqual(action, 42)
-        self.mock_client.get_move.assert_not_called()
+        self.mock_client.get_move_with_content.assert_not_called()
 
     def test_valid_llm_response(self):
-        """Test normal flow."""
+        """Test normal flow: LLM returns a legal action."""
         state = {
             "phase": "BIDDING",
             "round_num": 1,
             "current_player_id": 0,
             "my_hand": [10, 20],
-            "legal_actions": [0, 1, 2], # Bidding 0, 1, or 2
+            "legal_actions": [0, 1, 2],
             "bids": [-1]*4,
             "tricks_won": [0]*4,
             "graveyard": []
         }
-        
-        # Mock LLM returning "1"
-        self.mock_client.get_move.return_value = 1
-        
+
+        # Mock LLM returning action 1
+        self.mock_client.get_move_with_content.return_value = ("reasoning: bid 1", 1)
+
         action = self.agent.act(state)
         self.assertEqual(action, 1)
 
@@ -62,15 +64,18 @@ class TestLLMAgent(unittest.TestCase):
             "current_trick": [],
             "graveyard": []
         }
-        
+
         # Sequence: Returns 99 (Illegal) -> Returns 10 (Legal)
-        self.mock_client.get_move.side_effect = [99, 10]
-        
+        self.mock_client.get_move_with_content.side_effect = [
+            ("ACTION: 99", 99),
+            ("ACTION: 10", 10),
+        ]
+
         action = self.agent.act(state)
-        
+
         self.assertEqual(action, 10)
         # Verify it called client twice
-        self.assertEqual(self.mock_client.get_move.call_count, 2)
+        self.assertEqual(self.mock_client.get_move_with_content.call_count, 2)
 
 if __name__ == '__main__':
     unittest.main()

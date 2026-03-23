@@ -22,32 +22,37 @@ experiment:
   starting_round_strategy: "stratified"
   min_starting_round: 1       # lower bound for "random"; ignored by other strategies
 
+  # Episode length — how many rounds each game plays before stopping.
+  # 1 → single-round episodes: game_0 plays round 1, game_1 plays round 4,
+  #     game_2 plays round 7, then sleep cycle fires immediately.
+  # null / omit → play all rounds from starting_round through round 10.
+  rounds_per_game: 1
+
+  # Evaluation protocol — read-only Grimoire, fixed seeds, separate trace folder
+  eval_games: 10              # number of games per evaluation checkpoint
+  eval_seed_offset: 9000      # eval game i uses seed (eval_seed_offset + i); kept far
+                              # from training seeds to avoid overlap
+  eval_iteration: 0           # overridden by run_loop.sh at each checkpoint
+  eval_rounds_per_game: 3     # rounds to play per eval game (null → full 10-round game)
+                              # 3 rounds ≈ 6 tricks on average — fast but covers early/mid game
+
 game:
   num_players: 4
   num_rounds: 10
 
 # ---------------------------------------------------------------------------
-# vLLM server — launch with:
+# vLLM server — use scripts/start_vllm.sh (reads model_name from this file).
 #
-#   vllm serve Qwen/Qwen3-14B-AWQ \
-#     --dtype float16 \
-#     --quantization awq \
-#     --max-model-len 8192 \
-#     --gpu-memory-utilization 0.90 \
-#     --max-num-seqs 16 \
-#     --enable-prefix-caching \
-#     --tensor-parallel-size 1 \
-#     --port 8000
-#
-# Alternatives that also fit in 24 GB on a single RTX 3090:
-#   Qwen/Qwen3-8B                  (FP16, ~16 GB — no quantisation loss)
-#   Qwen/Qwen3-14B-AWQ             (INT4 AWQ, ~9 GB — recommended)
+# Alternatives that fit in 24 GB on a single RTX 3090:
+#   Qwen/Qwen3-8B                           (FP16, ~16 GB — no quantisation loss)
+#   Qwen/Qwen3-14B-AWQ                      (INT4, ~9 GB)
+#   QuixiAI/Qwen3-30B-A3B-AWQ              (MoE INT4, ~17 GB — 3B active, fast)
 #   bartowski/DeepSeek-R1-Distill-Qwen-14B-exl2  (INT4, ~9 GB — pure reasoning)
 #   mistralai/Mistral-Small-3.1-24B-Instruct-2503 (AWQ, ~13 GB — stronger, slower)
 # ---------------------------------------------------------------------------
 llm:
   base_url: "http://localhost:8000/v1"
-  model_name: "Qwen/Qwen3-14B-AWQ"
+  model_name: "QuixiAI/Qwen3-30B-A3B-AWQ"
 
   # --- Wake cycle (game moves): fast, focused, no deep thinking ---
   temperature: 0.35
@@ -58,14 +63,14 @@ llm:
   # --- Sleep cycle (reflection): deeper reasoning, more creative rules ---
   reflection_temperature: 0.45
   reflection_top_p: 0.95
-  reflection_max_tokens: 2048
+  reflection_max_tokens: 3072
   reflection_enable_thinking: true   # Full chain-of-thought for better rule quality
 
   # --- Pruning cycle (LLM-as-judge): strict, low-temperature analytical judgment ---
   pruner_temperature: 0.10
   pruner_top_p: 0.90
-  pruner_max_tokens: 1024
-  pruner_enable_thinking: true   # Reasoning helps catch subtle hallucinations
+  pruner_max_tokens: 512         # Classification task — no CoT needed; 512 covers DELETE list + brief notes
+  pruner_enable_thinking: false  # Thinking fills the budget before [DELETE]: is ever output
 
   max_retries: 3
 

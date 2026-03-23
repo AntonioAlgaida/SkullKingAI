@@ -55,13 +55,14 @@ def _make_game_logger(game_id: int) -> logging.Logger:
     game_logger.addHandler(fh)
     return game_logger
 
-async def run_single_game(game_id: int, cfg: DictConfig, client: LLMClient, memory: StrategyMemory, elo: EloTracker, starting_round: int = 1):
-    """Runs a game starting from starting_round through round 10 asynchronously."""
+async def run_single_game(game_id: int, cfg: DictConfig, client: LLMClient, memory: StrategyMemory, elo: EloTracker, starting_round: int = 1, ending_round: int = 10):
+    """Runs a game from starting_round through ending_round (inclusive), then stops."""
     game_log = _make_game_logger(game_id)
-    game_log.info(f"[Game {game_id}] Initialization started... (starting round: {starting_round})")
+    game_log.info(f"[Game {game_id}] Initialization started... (rounds {starting_round}–{ending_round})")
 
     env = SkullKingEnv(num_players=cfg.game.num_players)
-    state = env.reset(starting_round=starting_round)
+    start_player_offset = random.randint(0, cfg.game.num_players - 1)
+    state = env.reset(starting_round=starting_round, start_player_offset=start_player_offset)
     translator = SemanticTranslator(env.physics)
     
     agents =[]
@@ -180,6 +181,9 @@ async def run_single_game(game_id: int, cfg: DictConfig, client: LLMClient, memo
                 "won": list(info["won"])
             })
             game_log.info(f"[Game {game_id}] Round {state['round_num']} Complete. Current Scores: {new_totals}")
+            # Stop early if we've played all intended rounds
+            if state["round_num"] >= ending_round:
+                done = True
 
         state = new_state
 
@@ -221,13 +225,15 @@ def main(cfg: DictConfig):
     memory = StrategyMemory(persistence_path="data/chroma_db")
     elo    = EloTracker(persistence_path="data/elo_ratings.json")
 
-    concurrent_games = cfg.experiment.concurrent_games
+    concurrent_games  = cfg.experiment.concurrent_games
+    rounds_per_game   = int(getattr(cfg.experiment, "rounds_per_game", 10) or 10)
 
     async def run_all():
         tasks = [
             run_single_game(
                 i, cfg, client, memory, elo,
                 starting_round=_starting_round(i, concurrent_games, cfg),
+                ending_round=min(_starting_round(i, concurrent_games, cfg) + rounds_per_game - 1, 10),
             )
             for i in range(concurrent_games)
         ]

@@ -11,9 +11,9 @@ from src.engine.physics import GamePhysics, CardType, Suit
 # Set conservatively so fitness nudges ranking without dominating semantics.
 FITNESS_WEIGHT  = 0.05
 FITNESS_MAX     =  5.0
-FITNESS_MIN     = -3.0
-FITNESS_WIN     =  0.5   # delta added when the player succeeded this round
-FITNESS_LOSS    = -0.3   # delta added when the player failed this round
+FITNESS_MIN     = -2.0   # tighter floor — prevents rules from dying permanently
+FITNESS_WIN     =  0.8   # raised: reward success more aggressively
+FITNESS_LOSS    = -0.2   # lowered: softer penalty — failures dominate in early training
 
 logger = logging.getLogger(__name__)
 
@@ -114,12 +114,62 @@ class StrategyMemory:
             if not scored and docs:
                 scored = [(distances[0], docs[0])]
 
-            final_rules = [doc for _, doc in scored[:7]]
-            return "\n".join(f"- {rule}" for rule in final_rules)
+            # Re-attach metadata for fitness-tier formatting
+            # Build (eff_dist, doc, fitness) triples using the original zip
+            meta_map = {doc: float(meta.get("fitness", 0.0))
+                        for doc, meta in zip(docs, metas)}
+            ranked = [(eff_dist, doc, meta_map.get(doc, 0.0))
+                      for eff_dist, doc in scored[:7]]
+
+            return self._format_rules(ranked, query_text)
 
         except Exception as e:
             logger.error(f"Error retrieving rules: {e}")
             return f"Memory empty for {persona.upper()}. Playing mostly on instinct."
+
+    # ── Fitness-tier formatting ───────────────────────────────────────────── #
+
+    @staticmethod
+    def _format_rules(ranked: list, query_text: str) -> str:
+        """
+        Format retrieved rules into tiers based on fitness so the LLM
+        knows which rules are proven, experimental, or questionable.
+
+        Tiers:
+          PROVEN       fitness >= 2.0  — strong positive signal
+          EXPERIMENTAL fitness 0..2.0  — new or mildly positive
+          WEAK         fitness < 0     — previously led to failures
+        """
+        proven, experimental, weak = [], [], []
+        for _eff_dist, doc, fitness in ranked:
+            if fitness >= 2.0:
+                proven.append((doc, fitness))
+            elif fitness >= 0.0:
+                experimental.append((doc, fitness))
+            else:
+                weak.append((doc, fitness))
+
+        lines = [
+            f"[STRATEGIC MEMORY — retrieved for: \"{query_text}\"]",
+            "Rules from similar past situations, sorted by proven effectiveness:",
+        ]
+
+        if proven:
+            lines.append("\n[PROVEN STRATEGIES] — follow these confidently:")
+            for rule, fit in proven:
+                lines.append(f"  ★ (fitness {fit:+.1f}) {rule}")
+
+        if experimental:
+            lines.append("\n[EXPERIMENTAL STRATEGIES] — useful hints, apply with judgment:")
+            for rule, fit in experimental:
+                lines.append(f"  ◆ (fitness {fit:+.1f}) {rule}")
+
+        if weak:
+            lines.append("\n[WEAK STRATEGIES] — these previously led to failures; avoid unless situation is very different:")
+            for rule, fit in weak:
+                lines.append(f"  ✗ (fitness {fit:+.1f}) {rule}")
+
+        return "\n".join(lines)
 
     def memorize_rule(self, rule_text: str, persona: str, metadata: Dict[str, Any]):
         """
@@ -147,10 +197,12 @@ class StrategyMemory:
             ids=[rule_id]
         )
         
-    def _is_duplicate(self, collection, new_rule: str, threshold: float = 0.31) -> bool:
+    def _is_duplicate(self, collection, new_rule: str, threshold: float = 0.50) -> bool:
         """
-        Checks if the new rule is semantically identical to an existing one.
-        Threshold 0.31 (L2 distance) is a good baseline for 'very similar sentences'.
+        Checks if the new rule is semantically too similar to an existing one.
+        Threshold 0.50 (L2 distance) — catches near-paraphrases of the same insight,
+        not just exact copies. 0.31 was too tight; paraphrased duplicates were slipping
+        through and filling the Grimoire with redundant variations of the same lesson.
         """
         if collection.count() == 0:
             return False
@@ -232,6 +284,10 @@ class StrategyMemory:
                 updated_meta = {**meta, "fitness": new_val}
                 collection.update(ids=[rid], metadatas=[updated_meta])
                 logger.debug(f"[fitness] {rid}: {current:.2f} → {new_val:.2f} (Δ{delta:+.2f})")
+
+    def generate_query_context(self, state: Dict[str, Any]) -> str:
+        """Public alias — used by the action cache and any external caller."""
+        return self._generate_query_context(state)
 
     def _generate_query_context(self, state: Dict[str, Any]) -> str:
         """

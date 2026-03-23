@@ -19,11 +19,13 @@ set -euo pipefail
 
 ITERATIONS=${1:-3}
 MINI_BATCHES=${2:-3}
+START_ITER=${3:-1}
+END_ITER=$(( START_ITER + ITERATIONS - 1 ))
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "============================================"
 echo "  SkullZero Training Loop"
-echo "  Iterations : ${ITERATIONS}"
+echo "  Iterations : ${START_ITER} → ${END_ITER}"
 echo "  Mini-batches per iteration : ${MINI_BATCHES}"
 echo "  (games+sleep × ${MINI_BATCHES}, then prune once)"
 echo "============================================"
@@ -35,7 +37,7 @@ if ! curl -sf "http://localhost:8000/health" > /dev/null 2>&1; then
     exit 1
 fi
 
-for i in $(seq 1 "$ITERATIONS"); do
+for i in $(seq "$START_ITER" "$END_ITER"); do
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "  ITERATION ${i} / ${ITERATIONS}"
@@ -60,6 +62,11 @@ for i in $(seq 1 "$ITERATIONS"); do
     uv run python run_pruning.py
 
     echo ""
+    echo "  >>> [Eval]  Evaluating with read-only Grimoire..."
+    cd "$SCRIPT_DIR"
+    uv run python run_eval.py "experiment.eval_iteration=${i}"
+
+    echo ""
     echo "  Iteration ${i} complete."
 done
 
@@ -70,3 +77,10 @@ echo "  Memory: data/chroma_db/"
 echo "  ELO:    data/elo_ratings.json"
 echo "  Traces: outputs/"
 echo "============================================"
+
+echo " Plotting training curves..."
+echo "It reads every line in data/eval_log.jsonl (one line per completed iteration checkpoint) and writes PNG plots to data/artifacts/plots/."
+cd "$SCRIPT_DIR"
+uv run python scripts/plot_training_curves.py
+echo "Done. Plots saved to data/artifacts/plots/"
+

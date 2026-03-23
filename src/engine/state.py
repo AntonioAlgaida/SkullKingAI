@@ -48,7 +48,7 @@ class SkullKingEnv():
         self.current_trick_actions: List[tuple] = []
 
 
-    def reset(self, starting_round: int = 1) -> Dict[str, Any]:
+    def reset(self, starting_round: int = 1, start_player_offset: int = 0) -> Dict[str, Any]:
         """
         Reset the environment for a new game.
 
@@ -57,11 +57,14 @@ class SkullKingEnv():
           - k  → game starts at round k and plays through to round 10.
                  Scores begin at 0 regardless of k; only the hand size and
                  round-number dynamics change.
+        start_player_offset: shifts which seat leads round 1 (and all subsequent
+          rounds by the same amount). Randomising this across games prevents P0
+          from always bidding/playing first and biasing the experience distribution.
         """
         self.current_round = max(1, min(starting_round, 10))
         self.scores = [0] * self.num_players
-        # Rotate the first leader to match what a real game would have at this round
-        self.start_player_index = (self.current_round - 1) % self.num_players
+        # Rotate the first leader: base rotation + random seat offset
+        self.start_player_index = (self.current_round - 1 + start_player_offset) % self.num_players
 
         self._deal_round()
         return self.get_state_dict()

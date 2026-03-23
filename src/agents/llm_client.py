@@ -115,7 +115,7 @@ class LLMClient:
             full_text = f"{reasoning}\n{content}".strip()
 
             if response.usage:
-                logger.info(
+                logger.debug(
                     f"[async] tokens: prompt={response.usage.prompt_tokens}, "
                     f"completion={response.usage.completion_tokens}"
                 )

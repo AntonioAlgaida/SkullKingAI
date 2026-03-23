@@ -122,14 +122,44 @@ class SleepCycleReflector:
                 failed  = bids[pid] != won[pid]
                 success = bids[pid] == won[pid]
 
-                situation_query      = self._build_situation_query(pid, round_num, r_data, bids, won)
-                relevant_play_ids    = self.memory.query_rule_ids(situation_query, persona, "PLAYING")
-                relevant_bidding_ids = self.memory.query_rule_ids(situation_query, persona, "BIDDING")
-                fitness_delta        = FITNESS_LOSS if failed else FITNESS_WIN
-                all_relevant_ids     = relevant_play_ids + relevant_bidding_ids
-
                 starting_hand     = r_data.get("starting_hands",    {}).get(pid, [])
                 starting_hand_ids = r_data.get("starting_hand_ids", {}).get(pid, [])
+                fitness_delta     = FITNESS_LOSS if failed else FITNESS_WIN
+
+                # BIDDING credit always uses the round-level query (bid is placed at
+                # round start using the full starting hand — no single critical trick).
+                round_query          = self._build_situation_query(pid, round_num, r_data, bids, won)
+                relevant_bidding_ids = self.memory.query_rule_ids(round_query, persona, "BIDDING")
+
+                if failed:
+                    # PLAYING credit uses the critical-trick query (Option 3):
+                    # find the exact trick where failure became inevitable and anchor
+                    # credit to that state — only rules relevant to THAT moment are updated.
+                    critical_trick, critical_idx = self._find_critical_trick_with_index(
+                        pid, bids[pid], won[pid], r_data["tricks"]
+                    )
+                    if critical_trick and starting_hand_ids:
+                        play_query = self._build_critical_trick_query(
+                            pid, round_num, bids[pid], won[pid],
+                            critical_trick,
+                            r_data["tricks"][:critical_idx],
+                            starting_hand_ids,
+                        )
+                        logger.debug(
+                            f"[{persona.upper()}] Credit query anchored to critical trick "
+                            f"(trick {critical_idx + 1}): {play_query}"
+                        )
+                    else:
+                        # Fallback: no critical trick found (e.g., no hand IDs) — use round query
+                        play_query = round_query
+
+                    relevant_play_ids = self.memory.query_rule_ids(play_query, persona, "PLAYING")
+                    all_relevant_ids  = relevant_play_ids + relevant_bidding_ids
+
+                else:
+                    # SUCCESS: no single critical trick — use round-level query for both phases
+                    relevant_play_ids = self.memory.query_rule_ids(round_query, persona, "PLAYING")
+                    all_relevant_ids  = relevant_play_ids + relevant_bidding_ids
 
                 if failed:
                     # Failure: playing + bidding + counter-strategy
@@ -413,7 +443,11 @@ Example: [RULE]: When a FULL rational opponent leads a mid-value suit card (6–
         round_num: int, bid: int, won: int, rule_prefix: str,
     ):
         """Extract [RULE]: from LLM output and write to ChromaDB."""
-        match = re.search(r"\[RULE\]\s*:\s*(.*)", raw_content, re.IGNORECASE)
+        # Strip think blocks — [RULE]: is in the content after thinking, not inside it.
+        clean = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL)
+        clean = re.sub(r"◁think▷.*?◁/think▷", "", clean, flags=re.DOTALL)
+
+        match = re.search(r"\[RULE\]\s*:\s*(.*)", clean, re.IGNORECASE)
         if match:
             new_rule = match.group(1).strip()
             tag = rule_prefix.upper()
@@ -424,11 +458,11 @@ Example: [RULE]: When a FULL rational opponent leads a mid-value suit card (6–
             })
         else:
             logger.warning(
-                f"[{persona.upper()}] Failed to extract [RULE] from response:\n{raw_content[:300]}"
+                f"[{persona.upper()}] Failed to extract [RULE] from response:\n{raw_content[:400]}"
             )
 
         # Also save exploit rule if present in the same response
-        exploit_match = re.search(r"\[EXPLOIT\]\s*:\s*(.*)", raw_content, re.IGNORECASE)
+        exploit_match = re.search(r"\[EXPLOIT\]\s*:\s*(.*)", clean, re.IGNORECASE)
         if exploit_match:
             exploit_rule = exploit_match.group(1).strip()
             logger.info(f"[{persona.upper()}] [EXPLOIT] New rule: {exploit_rule}")
@@ -488,12 +522,55 @@ Example: [RULE]: When a FULL rational opponent leads a mid-value suit card (6–
     def _build_situation_query(
         pid: int, round_num: int, r_data: Dict, bids: List[int], won: List[int]
     ) -> str:
+        """Round-level query: used for BIDDING credit and SUCCESS credit."""
         round_stage = "Late Game" if round_num > 7 else ("Mid Game" if round_num > 4 else "Early Game")
         hand = r_data.get("starting_hands", {}).get(pid, [])
         hand_str = ", ".join(str(c) for c in hand[:4]) if hand else "unknown"
         return (
             f"{round_stage}. Round {round_num}. "
             f"Hand: {hand_str}. Bid {bids[pid]}, won {won[pid]}."
+        )
+
+    def _build_critical_trick_query(
+        self,
+        pid: int,
+        round_num: int,
+        bid: int,
+        won: int,
+        critical_trick: Dict,
+        tricks_before: List[Dict],
+        starting_hand_ids: List[int],
+    ) -> str:
+        """
+        Critical-trick-level query: used for PLAYING credit on failures.
+
+        Anchors fitness credit to the exact state when failure became inevitable —
+        the cards in play, the player's remaining hand, and what they actually played.
+        Rules matched to this specific context are the ones causally present at the
+        decisive moment, not just semantically near the general round description.
+        """
+        round_stage = "Late Game" if round_num > 7 else ("Mid Game" if round_num > 4 else "Early Game")
+
+        plays_str = ", ".join(critical_trick.get("plays", []))
+
+        # Reconstruct the player's hand at the critical trick
+        hand_at_trick: List[str] = []
+        if starting_hand_ids:
+            remaining_ids = self._sim.reconstruct_hand_at_trick(pid, starting_hand_ids, tricks_before)
+            hand_at_trick = [self._trans.translate_card(cid) for cid in remaining_ids[:5]]
+        hand_str = ", ".join(hand_at_trick) if hand_at_trick else "unknown"
+
+        # The card the player actually played in this trick
+        actual_card = next(
+            (self._trans.translate_card(aid)
+             for p, aid in critical_trick.get("actions", []) if p == pid),
+            "unknown",
+        )
+
+        return (
+            f"{round_stage}. Round {round_num}. Bid {bid}, won {won}. "
+            f"Critical trick — in play: {plays_str}. "
+            f"Player played: {actual_card}. Hand remaining: {hand_str}."
         )
 
     @staticmethod

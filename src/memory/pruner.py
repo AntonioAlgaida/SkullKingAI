@@ -81,11 +81,15 @@ If a rule is good, do NOT list it. When in doubt, keep it."""
                 trash = self._audit_batch(persona, batch_ids, batch_docs, bundle, phase)
                 ids_to_delete.extend(trash)
 
-        # Apply deletions
+        # Apply deletions — log full rule text before deleting for audit trail
         if ids_to_delete:
+            deleted_data = collection.get(ids=ids_to_delete, include=["documents"])
+            deleted_texts = deleted_data.get("documents", [])
+            for rule_id, rule_text in zip(ids_to_delete, deleted_texts):
+                logger.warning(f"[Pruner] DELETING [{rule_id}]: {rule_text}")
             logger.warning(
                 f"[Pruner] {persona.upper()}: deleting {len(ids_to_delete)}/{total_before} rules → "
-                f"{total_before - len(ids_to_delete)} remain. IDs: {ids_to_delete}"
+                f"{total_before - len(ids_to_delete)} remain."
             )
             collection.delete(ids=ids_to_delete)
         else:
@@ -94,6 +98,20 @@ If a rule is good, do NOT list it. When in doubt, keep it."""
     # ------------------------------------------------------------------ #
     # Batch auditor                                                        #
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _extract_strategy_section(bundle: str) -> str:
+        """
+        Returns only the '--- STRATEGY GUIDE ---' section of the bundle.
+        Drops the full card hierarchy, scoring tables, and examples (~2000 tokens)
+        that are not needed for judging whether a rule is tactically valid.
+        Falls back to the full bundle if the marker is absent.
+        """
+        marker = "--- STRATEGY GUIDE ---"
+        idx = bundle.find(marker)
+        if idx != -1:
+            return bundle[idx:]
+        return bundle
 
     def _audit_batch(
         self,
@@ -109,11 +127,14 @@ If a rule is good, do NOT list it. When in doubt, keep it."""
         for rule_id, text in zip(ids, docs):
             rules_text += f"ID: [{rule_id}]\nRULE: {text}\n\n"
 
-        # Static game context → system role (prefix-cached by vLLM)
+        # Keep the system prompt short: full bundle causes token overflow when
+        # thinking is disabled and the completion budget is tight.
+        # The strategy section alone is sufficient for judging rule quality.
+        strategy_section = self._extract_strategy_section(bundle)
         system_prompt = (
-            f"You are the Supreme Auditor for a Skull King AI. "
-            f"Your job is to delete bad {phase} memories from the AI's database.\n\n"
-            f"[GAME RULES & STRATEGY]\n{bundle}\n\n"
+            f"You are the memory auditor for a Skull King AI. "
+            f"Delete bad {phase} rules from the database.\n\n"
+            f"[STRATEGY CONTEXT]\n{strategy_section}\n\n"
             f"[AUDIT CRITERIA]\n{self.AUDIT_CRITERIA}"
         )
 
